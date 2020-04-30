@@ -41,10 +41,17 @@ The result is given as `(c, t)`, where `c` contains the curves (as a vector of c
 and `t` are the parameters of the interpolated points.
 """
 function interpolate(points; closed = true)
-    n = length(points)
+    n = length(points) - (closed ? 0 : 2)
+
+    c = map(p -> [nothing, p, nothing], closed ? points : points[2:end-1])
+    if (!closed)
+        c[1][1] = points[1]
+        c[n][3] = points[end]
+        points = points[2:end-1]
+    end
+
     λ = fill(0.5, n)
-    t = fill(0.5, n) #Vector{Float64}(undef, n)
-    c = map(p -> [nothing, p, nothing], points)
+    t = Vector{Float64}(undef, n)
 
     # Setup right-hand side for the linear equation system
     rhs = Matrix{Float64}(undef, n, 2)
@@ -52,30 +59,12 @@ function interpolate(points; closed = true)
         rhs[i,:] = points[i]
     end
 
-    update_endpoints(c, λ, closed)
+    update_endpoints!(c, λ, closed)
 
     for iteration in 1:maxiter
-        # Update λ
-        for i in 1:n
-            ip = mod1(i + 1, n)
-            tmp = sqrt(abs(Δ(c[i][1], c[i][2], c[ip][2])))
-            denom = (tmp + sqrt(abs(Δ(c[i][2], c[ip][2], c[ip][3]))))
-            if denom < 1e-10
-                denom += 1e-10
-            end
-            λ[i] = tmp / denom
-        end
-
-        update_endpoints(c, λ, closed)
-
-        # Update t
-        for i in 1:n
-            a = [-norm(c[i][1] - points[i]) ^ 2,
-                 dot(3 * c[i][1] - 2 * points[i] - c[i][3], c[i][1] - points[i]),
-                 3 * dot(c[i][3] - c[i][1], c[i][1] - points[i]),
-                 norm(c[i][3] - c[i][1]) ^ 2]
-            t[i] = solve_cubic(a)
-        end
+        λ = compute_lambdas(c, closed)
+        update_endpoints!(c, λ, closed)
+        t = map(i -> compute_parameter(c[i], points[i]), 1:n)
 
         if iteration == maxiter
             max_error = maximum(i -> norm(bezier_eval(c[i], t[i]) - points[i]), 1:n)
@@ -83,43 +72,76 @@ function interpolate(points; closed = true)
             break
         end
 
-        # Update c
-        A = zeros(n, n)
-        for i in 1:n
-            im = mod1(i - 1, n)
-            ip = mod1(i + 1, n)
-            A[i,im] = (1 - λ[im]) * (1 - t[i]) ^ 2
-            A[i,i]  = λ[im] * (1 - t[i]) ^ 2 + (2 - (1 + λ[i]) * t[i]) * t[i]
-            A[i,ip] = λ[i] * t[i] ^ 2
-        end
-        x = A \ rhs
+        x = compute_central_cps(c, λ, t, rhs, closed)
         max_deviation = 0
         for i in 1:n
             max_deviation = max(max_deviation, norm(x[i,:] - c[i][2]))
             c[i][2] = x[i,:]
         end
 
-        # Check convergence
         max_deviation < distance_tolerance && break
     end
 
-    update_endpoints(c, λ, closed)
+    update_endpoints!(c, λ, closed)
     (c, t)
 end
 
 """
-    update_endpoints(c, λ, closed)
+    update_endpoints!(c, λ, closed)
 
-Updates the endpoints of each curve segment, based on the λ values.
+Destructively updates the endpoints of each curve segment, based on the λ values.
 """
-function update_endpoints(c, λ, closed)
-    @assert closed "Open curve: TODO"
+function update_endpoints!(c, λ, closed)
     n = length(c)
     for i in 1:n
         ip = mod1(i + 1, n)
-        c[i][3] = (1 - λ[i]) * c[i][2] + λ[i] * c[ip][2]
-        c[ip][1] = c[i][3]
+        if closed || i < n
+            c[i][3] = (1 - λ[i]) * c[i][2] + λ[i] * c[ip][2]
+        end
+        if closed || ip > 1
+            c[ip][1] = c[i][3]
+        end
     end
+end
+
+"""
+    compute_lambdas(c, closed)
+
+Computes λ values based on control point triangle areas.
+"""
+function compute_lambdas(c, closed)
+    n = length(c)
+    map(1:n) do i
+        !closed && i == n && return 0 # not used
+        ip = mod1(i + 1, n)
+        tmp = sqrt(abs(Δ(c[i][1], c[i][2], c[ip][2])))
+        denom = (tmp + sqrt(abs(Δ(c[i][2], c[ip][2], c[ip][3]))))
+        if denom < 1e-10
+            denom += 1e-10
+        end
+        tmp / denom
+    end
+end
+
+"""
+    Δ(a, b, c)
+
+Computes the signed area of the triangle defined by the points `a`, `b` and `c`.
+"""
+Δ(a, b, c) = det([b - a  c - a]) / 2
+
+"""
+    compute_parameter(curve, p)
+
+Computes the parameter where the given quadratic curve takes its largest curvature value.
+`p` is a point to interpolate.
+"""
+function compute_parameter(curve, p)
+    a = [-norm(curve[1] - p) ^ 2,
+         dot(3 * curve[1] - 2 * p - curve[3], curve[1] - p),
+         3 * dot(curve[3] - curve[1], curve[1] - p),
+         norm(curve[3] - curve[1]) ^ 2]
+    solve_cubic(a)
 end
 
 """
@@ -139,11 +161,40 @@ function solve_cubic(coeffs)
 end
 
 """
-    Δ(a, b, c)
+    compute_central_cps(c, λ, t, points, closed)
 
-Computes the signed area of the triangle defined by the points `a`, `b` and `c`.
+Computes the central control points of the qudratic Bezier curves `c`
+in such a way that `c(t[i]) = points[i]`, where `points` is a matrix of size `(n, 2)`.
+The control points satisfy `c[i][3] = (1-λ[i]) c[i][2] + λ[i] c[i+1][2]`.
+The result is also a matrix of size `(n, 2)`.
 """
-Δ(a, b, c) = det([b - a  c - a]) / 2
+function compute_central_cps(c, λ, t, points, closed)
+    n = length(c)
+    A = zeros(n, n)
+    fixed = zeros(n, 2)
+    for i in 1:n
+        im = mod1(i - 1, n)
+        ip = mod1(i + 1, n)
+        if closed || i > 1
+            A[i,im] = (1 - λ[im]) * (1 - t[i]) ^ 2
+        else
+            fixed[1,:] -= c[1][1] * (1 - t[i]) ^ 2
+        end
+        if closed || i < n
+            A[i,ip] = λ[i] * t[i] ^ 2
+        else
+            fixed[n,:] -= c[n][3] * t[i] ^ 2
+        end
+        if closed || 1 < i < n
+            A[i,i] = λ[im] * (1 - t[i]) ^ 2 + (2 - (1 + λ[i]) * t[i]) * t[i]
+        elseif i == 1
+            A[i,i] = (2 - (1 + λ[i]) * t[i]) * t[i]
+        else # i == n
+            A[i,i] = λ[im] * (1 - t[i]) ^ 2 + 2 * (1 - t[i]) * t[i]
+        end
+    end
+    A \ (points + fixed)
+end
 
 
 # Bezier evaluation
