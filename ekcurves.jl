@@ -22,12 +22,14 @@ point_size = 5
 rectangle_scale = 1.4
 
 # GUI variables
+show_controls = false
 closed_curve = true
-quartic_curve = false
+cubic_curve = false
 alpha = 2/3
 
 # Global variables
 points = []
+controls = []
 curve = []
 curvature = []
 max_curvatures = []
@@ -36,13 +38,13 @@ max_curvatures = []
 # Interpolation
 
 """
-    interpolate(points; closed = true)
+    interpolate(points; closed, cubic)
 
 Interpolates an (ϵ)-κ-curve on the given points.
 The result is given as `(c, t)`, where `c` contains the curves (as a vector of control points),
 and `t` are the parameters of the interpolated points.
 """
-function interpolate(points; closed = true)
+function interpolate(points; closed = true, cubic = false)
     n = length(points) - (closed ? 0 : 2)
 
     c = map(p -> [nothing, p, nothing], closed ? points : points[2:end-1])
@@ -61,12 +63,12 @@ function interpolate(points; closed = true)
         rhs[i,:] = points[i]
     end
 
-    update_endpoints!(c, λ, closed)
+    update_endpoints!(c, λ, closed, Val(cubic))
 
     for iteration in 1:maxiter
-        λ = compute_lambdas(c, closed)
-        update_endpoints!(c, λ, closed)
-        t = map(i -> compute_parameter(c[i], points[i]), 1:n)
+        λ = compute_lambdas(c, closed, Val(cubic))
+        update_endpoints!(c, λ, closed, Val(cubic))
+        t = map(i -> compute_parameter(c[i], points[i], Val(cubic)), 1:n)
 
         if iteration == maxiter
             max_error = maximum(i -> norm(bezier_eval(c[i], t[i]) - points[i]), 1:n)
@@ -74,7 +76,7 @@ function interpolate(points; closed = true)
             break
         end
 
-        x = compute_central_cps(c, λ, t, rhs, closed)
+        x = compute_central_cps(c, λ, t, rhs, closed, Val(cubic))
         max_deviation = 0
         for i in 1:n
             max_deviation = max(max_deviation, norm(x[i,:] - c[i][2]))
@@ -84,16 +86,16 @@ function interpolate(points; closed = true)
         max_deviation < distance_tolerance && break
     end
 
-    update_endpoints!(c, λ, closed)
+    update_endpoints!(c, λ, closed, Val(cubic))
     (c, t)
 end
 
 """
-    update_endpoints!(c, λ, closed)
+    update_endpoints!(c, λ, closed, Val(false))
 
 Destructively updates the endpoints of each curve segment, based on the λ values.
 """
-function update_endpoints!(c, λ, closed)
+function update_endpoints!(c, λ, closed, ::Val{false})
     n = length(c)
     for i in 1:n
         ip = mod1(i + 1, n)
@@ -107,11 +109,11 @@ function update_endpoints!(c, λ, closed)
 end
 
 """
-    compute_lambdas(c, closed)
+    compute_lambdas(c, closed, Val(false))
 
 Computes λ values based on control point triangle areas.
 """
-function compute_lambdas(c, closed)
+function compute_lambdas(c, closed, ::Val{false})
     n = length(c)
     map(1:n) do i
         !closed && i == n && return 0 # not used
@@ -133,12 +135,12 @@ Computes the signed area of the triangle defined by the points `a`, `b` and `c`.
 Δ(a, b, c) = det([b - a  c - a]) / 2
 
 """
-    compute_parameter(curve, p)
+    compute_parameter(curve, p, Val(false))
 
 Computes the parameter where the given quadratic curve takes its largest curvature value.
 `p` is a point to interpolate.
 """
-function compute_parameter(curve, p)
+function compute_parameter(curve, p, ::Val{false})
     a = [-norm(curve[1] - p) ^ 2,
          dot(3 * curve[1] - 2 * p - curve[3], curve[1] - p),
          3 * dot(curve[3] - curve[1], curve[1] - p),
@@ -163,14 +165,14 @@ function solve_cubic(coeffs)
 end
 
 """
-    compute_central_cps(c, λ, t, points, closed)
+    compute_central_cps(c, λ, t, points, closed, Val(false))
 
-Computes the central control points of the qudratic Bezier curves `c`
+Computes the central control points of the quadratic Bezier curves `c`
 in such a way that `c(t[i]) = points[i]`, where `points` is a matrix of size `(n, 2)`.
 The control points satisfy `c[i][3] = (1-λ[i]) c[i][2] + λ[i] c[i+1][2]`.
 The result is also a matrix of size `(n, 2)`.
 """
-function compute_central_cps(c, λ, t, points, closed)
+function compute_central_cps(c, λ, t, points, closed, ::Val{false})
     n = length(c)
     A = zeros(n, n)
     fixed = zeros(n, 2)
@@ -303,6 +305,110 @@ function bezier_curvature(curve, u)
 end
 
 
+# Cubic version
+
+"""
+    update_endpoints!(c, λ, closed, Val(true))
+
+Destructively updates the endpoints of each curve segment, based on the λ values.
+"""
+function update_endpoints!(c, λ, closed, ::Val{true})
+    n = length(c)
+    for i in 1:n
+        ip = mod1(i + 1, n)
+        if closed || i < n
+            c[i][3] = (1 - λ[i]) * c[i][2] + λ[i] * c[ip][2]
+        end
+        if closed || ip > 1
+            c[ip][1] = c[i][3]
+        end
+    end
+end
+
+"""
+    compute_lambdas(c, closed, Val(true))
+
+Computes λ values based on control point triangle areas.
+"""
+function compute_lambdas(c, closed, ::Val{true})
+    n = length(c)
+    map(1:n) do i
+        !closed && i == n && return 0 # not used
+        ip = mod1(i + 1, n)
+        tmp = sqrt(abs(Δ(c[i][1], c[i][2], c[ip][2])))
+        denom = (tmp + sqrt(abs(Δ(c[i][2], c[ip][2], c[ip][3]))))
+        if denom < 1e-10
+            denom += 1e-10
+        end
+        tmp / denom
+    end
+end
+
+"""
+    compute_parameter(curve, p, Val(true))
+
+Computes the parameter where the given quadratic curve takes its largest curvature value.
+`p` is a point to interpolate.
+"""
+function compute_parameter(curve, p, ::Val{true})
+    a = [-norm(curve[1] - p) ^ 2,
+         dot(3 * curve[1] - 2 * p - curve[3], curve[1] - p),
+         3 * dot(curve[3] - curve[1], curve[1] - p),
+         norm(curve[3] - curve[1]) ^ 2]
+    solve_cubic(a)
+end
+
+"""
+    compute_central_cps(c, λ, t, points, closed, Val(true))
+
+Computes the "central" control points of the cubic Bezier curves `c`
+in such a way that `c(t[i]) = points[i]`, where `points` is a matrix of size `(n, 2)`.
+The control points satisfy `c[i][3] = (1-λ[i]) c[i][2] + λ[i] c[i+1][2]`.
+The result is also a matrix of size `(n, 2)`.
+"""
+function compute_central_cps(c, λ, t, points, closed, ::Val{true})
+    n = length(c)
+    A = zeros(n, n)
+    fixed = zeros(n, 2)
+    for i in 1:n
+        im = mod1(i - 1, n)
+        ip = mod1(i + 1, n)
+        if closed || i > 1
+            A[i,im] = (1 - λ[im]) * (1 - t[i]) ^ 2
+        else
+            fixed[1,:] -= c[1][1] * (1 - t[i]) ^ 2
+        end
+        if closed || i < n
+            A[i,ip] = λ[i] * t[i] ^ 2
+        else
+            fixed[n,:] -= c[n][3] * t[i] ^ 2
+        end
+        if closed || 1 < i < n
+            A[i,i] = λ[im] * (1 - t[i]) ^ 2 + (2 - (1 + λ[i]) * t[i]) * t[i]
+        elseif i == 1
+            A[i,i] = (2 - (1 + λ[i]) * t[i]) * t[i]
+        else # i == n
+            A[i,i] = λ[im] * (1 - t[i]) ^ 2 + 2 * (1 - t[i]) * t[i]
+        end
+    end
+    A \ (points + fixed)
+end
+
+"""
+    create_cubic(points, ratio)
+
+Creates the control points of a cubic Bezier curve based on 3 `points`
+and the given `ratio`. When `ratio == 2/3`, this will be the same curve
+as the quadratic Bezier curve defined by the same points.
+"""
+function create_cubic(points, ratio)
+    [points[1],
+     points[1] * (1 - ratio) + points[2] * ratio,
+     points[2] * ratio + points[3] * (1 - ratio),
+     points[3]]
+end
+
+
 # Graphics
 
 function draw_polygon(ctx, poly, closep = false)
@@ -333,6 +439,13 @@ draw_callback = @guarded (canvas) -> begin
     # Graphics.set_line_width(ctx, 1.0)
     # draw_polygon(ctx, points, closed_curve)
 
+    if show_controls
+        # Control polygon
+        Graphics.set_source_rgb(ctx, 1, 0, 1)
+        Graphics.set_line_width(ctx, 2.0)
+        draw_polygon(ctx, controls, closed_curve)
+    end
+
     # Generated curve
     Graphics.set_source_rgb(ctx, 0.8, 0.3, 0)
     Graphics.set_line_width(ctx, 2.0)
@@ -343,7 +456,7 @@ draw_callback = @guarded (canvas) -> begin
     Graphics.set_line_width(ctx, 1.0)
     draw_polygon(ctx, curvature, closed_curve)
     for i in 1:length(curvature)
-        i % curvature_sparsity != 0 && continue
+        i % curvature_sparsity != 1 && i != length(curvature) && continue
         Graphics.new_path(ctx)
         Graphics.move_to(ctx, curve[i][1], curve[i][2])
         Graphics.line_to(ctx, curvature[i][1], curvature[i][2])
@@ -376,7 +489,11 @@ end
 
 function generate_curve()
     length(points) < 3 && return
-    cpts, t = interpolate(points, closed=closed_curve)
+    cpts, t = interpolate(points, closed=closed_curve, cubic=cubic_curve)
+    if cubic_curve
+        cpts = map(c -> create_cubic(c, alpha), cpts)
+    end
+    global controls = vcat(cpts...)
     global curve = []
     global curvature = []
     for c in cpts
@@ -438,6 +555,15 @@ function setup_gui()
     push!(vbox, hbox)
     push!(hbox, reset)
 
+    # Show controls checkbox
+    controlsp = GtkCheckButton("Show controls")
+    controlsp.active[Bool] = show_controls
+    signal_connect(controlsp, "toggled") do cb
+        global show_controls = cb.active[Bool]
+        draw(canvas)
+    end
+    push!(hbox, controlsp)
+
     # Closed checkbox
     closedp = GtkCheckButton("Closed curve")
     closedp.active[Bool] = closed_curve
@@ -448,15 +574,15 @@ function setup_gui()
     end
     push!(hbox, closedp)
 
-    # Quartic checkbox
-    quarticp = GtkCheckButton("Quartic")
-    quarticp.active[Bool] = quartic_curve
-    signal_connect(quarticp, "toggled") do cb
-        global quartic_curve = cb.active[Bool]
+    # Cubic checkbox
+    cubicp = GtkCheckButton("Cubic")
+    cubicp.active[Bool] = cubic_curve
+    signal_connect(cubicp, "toggled") do cb
+        global cubic_curve = cb.active[Bool]
         generate_curve()
         draw(canvas)
     end
-    push!(hbox, quarticp)
+    push!(hbox, cubicp)
 
     hbox = GtkBox(:h)
     push!(vbox, hbox)
