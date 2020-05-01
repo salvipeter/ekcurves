@@ -329,18 +329,23 @@ Computes the first two derivatives of the curvature at `u`.
 function bezier_curvature_derivatives(curve, u)
     (_, d1, d2, d3, d4) = bezier_eval(curve, u, 4)
 
+    d1d2 = dot(d1, d2)
+    d1d3 = dot(d1, d3)
+    d2d2 = dot(d2, d2)
+
+    d1xd2 = det([d1 d2])
+    d1xd3 = det([d1 d3])
+    d1xd4 = det([d1 d4])
+    d2xd3 = det([d2 d3])
+
     n = norm(d1)
 
-    v0 = d1[1] * d3[2] - d3[1] * d1[2]
-    v1 = 3 * (d1[1] * d2[2] - d1[2] * d2[1]) * (d1[1] * d2[1] + d1[2] * d2[2])
-    r1 = v0 / n ^ 3 - v1 / n ^ 5
+    r1 = d1xd3 / n ^ 3 - 3 * d1xd2 * d1d2 / n ^ 5
 
-    w0 = d2[1] * d3[2] + d1[1] * d4[2] - d2[2] * d3[1] - d1[2] * d4[1]
-    w1 = 3 * (d1[1] * d3[2] - d1[2] * d3[1]) * (d1[1] * d2[1] + d1[2] * d2[2])
-    w2 = 3 * ((d1[1] * d3[2] - d1[2] * d3[1]) * (d1[1] * d2[1] + d1[2] * d2[2]) +
-              (d1[1] * d2[2] - d1[2] * d2[1]) * (d2[1] * d2[1] + d1[1] * d3[1] +
-                                                 d2[2] * d2[2] + d1[2] * d3[2]))
-    w3 = 15 * (d1[1] * d2[2] - d1[2] * d2[1]) * (d1[1] * d2[1] + d1[2] * d2[2]) ^ 2
+    w0 = d2xd3 + d1xd4
+    w1 = 3 * d1xd3 * d1d2
+    w2 = 3 * (d1xd3 * d1d2 + d1xd2 * (d2d2 + d1d3))
+    w3 = 15 * d1xd2 * d1d2 ^ 2
     r2 = w0 / n ^ 3 - w1 / n ^ 5 - w2 / n ^ 5 + w3 / n ^ 7
 
     (r1, r2)
