@@ -11,6 +11,10 @@ import Graphics
 maxiter = 1000
 distance_tolerance = 1e-4
 warn_for_convergence_failure = false
+# [Cubic t-update parameters]
+relaxation = 0.1
+newton_iterations = 100
+newton_tolerance = 1e-4
 
 # GUI parameters
 width = 500
@@ -46,6 +50,7 @@ and `t` are the parameters of the interpolated points.
 """
 function interpolate(points; closed = true, cubic = false, alpha = 2/3)
     n = length(points) - (closed ? 0 : 2)
+    relax = cubic ? relaxation : 1
 
     c = map(p -> [nothing, p, nothing], closed ? points : points[2:end-1])
     if (!closed)
@@ -66,10 +71,11 @@ function interpolate(points; closed = true, cubic = false, alpha = 2/3)
     update_endpoints!(c, λ, closed)
 
     for iteration in 1:maxiter
-        λ = compute_lambdas(c, closed)
+        λ = λ * (1 - relax) + compute_lambdas(c, closed) * relax
         update_endpoints!(c, λ, closed)
         if cubic
-            t = map(i -> compute_parameter(create_cubic(c[i], alpha)), 1:n)
+            t1 = map(i -> compute_parameter(create_cubic(c[i], alpha), t[i], true), 1:n)
+            t = t * (1 - relax) + t1 * relax
         else
             t = map(i -> compute_parameter(c[i], points[i]), 1:n)
         end
@@ -91,7 +97,7 @@ function interpolate(points; closed = true, cubic = false, alpha = 2/3)
         max_deviation = 0
         for i in 1:n
             max_deviation = max(max_deviation, norm(x[i,:] - c[i][2]))
-            c[i][2] = x[i,:]
+            c[i][2] = c[i][2] * (1 - relax) + x[i,:] * relax
         end
 
         max_deviation < distance_tolerance && break
@@ -315,24 +321,62 @@ function bezier_curvature(curve, u)
     det([der[2] der[3]]) / norm(der[2]) ^ 3
 end
 
+"""
+    bezier_curvature_derivatives(curve, u)
+
+Computes the first two derivatives of the curvature at `u`.
+"""
+function bezier_curvature_derivatives(curve, u)
+    (_, d1, d2, d3, d4) = bezier_eval(curve, u, 4)
+
+    n = norm(d1)
+
+    v0 = d1[1] * d3[2] - d3[1] * d1[2]
+    v1 = 3 * (d1[1] * d2[2] - d1[2] * d2[1]) * (d1[1] * d2[1] + d1[2] * d2[2])
+    r1 = v0 / n ^ 3 - v1 / n ^ 5
+
+    w0 = d2[1] * d3[2] + d1[1] * d4[2] - d2[2] * d3[1] - d1[2] * d4[1]
+    w1 = 3 * (d1[1] * d3[2] - d1[2] * d3[1]) * (d1[1] * d2[1] + d1[2] * d2[2])
+    w2 = 3 * ((d1[1] * d3[2] - d1[2] * d3[1]) * (d1[1] * d2[1] + d1[2] * d2[2]) +
+              (d1[1] * d2[2] - d1[2] * d2[1]) * (d2[1] * d2[1] + d1[1] * d3[1] +
+                                                 d2[2] * d2[2] + d1[2] * d3[2]))
+    w3 = 15 * (d1[1] * d2[2] - d1[2] * d2[1]) * (d1[1] * d2[1] + d1[2] * d2[2]) ^ 2
+    r2 = w0 / n ^ 3 - w1 / n ^ 5 - w2 / n ^ 5 + w3 / n ^ 7
+
+    (r1, r2)
+end
+
 
 # Cubic version
 
 """
-    compute_parameter(curve)
+    compute_parameter(curve, t, init)
 
 Computes the parameter where the given cubic curve takes its largest curvature value.
+The Newton iteration starts from `t`, unless `init` is `true`,
+in which case a search is done for a good starting parameter.
 """
-function compute_parameter(curve)
-    # TODO: just sampling for now
-    t = 0
-    max = 0
-    for u in 0:0.01:1
-        c = abs(bezier_curvature(curve, u))
-        if c > max
-            max = c
-            t = u
+function compute_parameter(curve, t, init)
+    # Find a starting parameter for the Newton iteration
+    if init
+        t = 0
+        max = 0
+        for u in 0:0.01:1
+            c = abs(bezier_curvature(curve, u))
+            if c > max
+                max = c
+                t = u
+            end
         end
+    end
+
+    for _ in newton_iterations
+        t_old = t
+        fx, dfx = bezier_curvature_derivatives(curve, t)
+        (abs(fx) < newton_tolerance || abs(dfx) < newton_tolerance) && break
+        t -= fx / dfx
+        t = clamp(t, 0, 1)
+        t != 0 && abs((t - t_old) / t) < newton_tolerance && break
     end
     t
 end
