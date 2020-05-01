@@ -23,6 +23,8 @@ rectangle_scale = 1.4
 
 # GUI variables
 closed_curve = true
+quartic_curve = false
+alpha = 2/3
 
 # Global variables
 points = []
@@ -432,19 +434,49 @@ function setup_gui()
         draw(canvas)
     end
     hbox = GtkBox(:h)
-    set_gtk_property!(hbox, :spacing, 10)
+    hbox.spacing[Int] = 10
     push!(vbox, hbox)
     push!(hbox, reset)
 
-    # Closed Checkbox
+    # Closed checkbox
     closedp = GtkCheckButton("Closed curve")
-    set_gtk_property!(closedp, :active, closed_curve)
+    closedp.active[Bool] = closed_curve
     signal_connect(closedp, "toggled") do cb
-        global closed_curve = get_gtk_property(cb, :active, Bool)
+        global closed_curve = cb.active[Bool]
         generate_curve()
         draw(canvas)
     end
     push!(hbox, closedp)
+
+    # Quartic checkbox
+    quarticp = GtkCheckButton("Quartic")
+    quarticp.active[Bool] = quartic_curve
+    signal_connect(quarticp, "toggled") do cb
+        global quartic_curve = cb.active[Bool]
+        generate_curve()
+        draw(canvas)
+    end
+    push!(hbox, quarticp)
+
+    hbox = GtkBox(:h)
+    push!(vbox, hbox)
+
+    # Alpha slider
+    push!(hbox, GtkLabel("Alpha: "))
+    choices = ["0.1", "0.2", "1/3", "0.5", "2/3", "0.8", "0.9"]
+    choices_float = [0.1, 0.2, 1/3, 0.5, 2/3, 0.8, 0.9]
+    radios = [GtkRadioButton(choice) for choice in choices]
+    for r in radios
+        r.group[GtkRadioButton] = radios[1]
+        signal_connect(r, "toggled") do _
+            !r.active[Bool] && return
+            global alpha = choices_float[findfirst(rb -> rb === r, radios)]
+            generate_curve()
+            draw(canvas)
+        end
+        push!(hbox, r)
+    end
+    radios[5].active[Bool] = true
 
     generate_curve()
     showall(win)
