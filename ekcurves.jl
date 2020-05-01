@@ -38,13 +38,13 @@ max_curvatures = []
 # Interpolation
 
 """
-    interpolate(points; closed, cubic)
+    interpolate(points; closed, cubic, alpha)
 
 Interpolates an (ϵ)-κ-curve on the given points.
 The result is given as `(c, t)`, where `c` contains the curves (as a vector of control points),
 and `t` are the parameters of the interpolated points.
 """
-function interpolate(points; closed = true, cubic = false)
+function interpolate(points; closed = true, cubic = false, alpha = 2/3)
     n = length(points) - (closed ? 0 : 2)
 
     c = map(p -> [nothing, p, nothing], closed ? points : points[2:end-1])
@@ -63,20 +63,31 @@ function interpolate(points; closed = true, cubic = false)
         rhs[i,:] = points[i]
     end
 
-    update_endpoints!(c, λ, closed, Val(cubic))
+    update_endpoints!(c, λ, closed)
 
     for iteration in 1:maxiter
-        λ = compute_lambdas(c, closed, Val(cubic))
-        update_endpoints!(c, λ, closed, Val(cubic))
-        t = map(i -> compute_parameter(c[i], points[i], Val(cubic)), 1:n)
+        λ = compute_lambdas(c, closed)
+        update_endpoints!(c, λ, closed)
+        if cubic
+            t = map(i -> compute_parameter(create_cubic(c[i], alpha)), 1:n)
+        else
+            t = map(i -> compute_parameter(c[i], points[i]), 1:n)
+        end
 
         if iteration == maxiter
-            max_error = maximum(i -> norm(bezier_eval(c[i], t[i]) - points[i]), 1:n)
+            max_error = maximum(1:n) do i
+                cp = cubic ? create_cubic(c[i], alpha) : c[i]
+                norm(bezier_eval(cp, t[i]) - points[i])
+            end
             warn_for_convergence_failure && @warn "Did not converge - err: $max_error"
             break
         end
 
-        x = compute_central_cps(c, λ, t, rhs, closed, Val(cubic))
+        if cubic
+            x = compute_central_cps(c, λ, t, rhs, closed, alpha)
+        else
+            x = compute_central_cps(c, λ, t, rhs, closed)
+        end
         max_deviation = 0
         for i in 1:n
             max_deviation = max(max_deviation, norm(x[i,:] - c[i][2]))
@@ -86,16 +97,16 @@ function interpolate(points; closed = true, cubic = false)
         max_deviation < distance_tolerance && break
     end
 
-    update_endpoints!(c, λ, closed, Val(cubic))
+    update_endpoints!(c, λ, closed)
     (c, t)
 end
 
 """
-    update_endpoints!(c, λ, closed, Val(false))
+    update_endpoints!(c, λ, closed)
 
 Destructively updates the endpoints of each curve segment, based on the λ values.
 """
-function update_endpoints!(c, λ, closed, ::Val{false})
+function update_endpoints!(c, λ, closed)
     n = length(c)
     for i in 1:n
         ip = mod1(i + 1, n)
@@ -109,11 +120,11 @@ function update_endpoints!(c, λ, closed, ::Val{false})
 end
 
 """
-    compute_lambdas(c, closed, Val(false))
+    compute_lambdas(c, closed)
 
 Computes λ values based on control point triangle areas.
 """
-function compute_lambdas(c, closed, ::Val{false})
+function compute_lambdas(c, closed)
     n = length(c)
     map(1:n) do i
         !closed && i == n && return 0 # not used
@@ -135,12 +146,12 @@ Computes the signed area of the triangle defined by the points `a`, `b` and `c`.
 Δ(a, b, c) = det([b - a  c - a]) / 2
 
 """
-    compute_parameter(curve, p, Val(false))
+    compute_parameter(curve, p)
 
 Computes the parameter where the given quadratic curve takes its largest curvature value.
 `p` is a point to interpolate.
 """
-function compute_parameter(curve, p, ::Val{false})
+function compute_parameter(curve, p)
     a = [-norm(curve[1] - p) ^ 2,
          dot(3 * curve[1] - 2 * p - curve[3], curve[1] - p),
          3 * dot(curve[3] - curve[1], curve[1] - p),
@@ -165,14 +176,14 @@ function solve_cubic(coeffs)
 end
 
 """
-    compute_central_cps(c, λ, t, points, closed, Val(false))
+    compute_central_cps(c, λ, t, points, closed)
 
 Computes the central control points of the quadratic Bezier curves `c`
 in such a way that `c(t[i]) = points[i]`, where `points` is a matrix of size `(n, 2)`.
 The control points satisfy `c[i][3] = (1-λ[i]) c[i][2] + λ[i] c[i+1][2]`.
 The result is also a matrix of size `(n, 2)`.
 """
-function compute_central_cps(c, λ, t, points, closed, ::Val{false})
+function compute_central_cps(c, λ, t, points, closed)
     n = length(c)
     A = zeros(n, n)
     fixed = zeros(n, 2)
@@ -308,65 +319,33 @@ end
 # Cubic version
 
 """
-    update_endpoints!(c, λ, closed, Val(true))
+    compute_parameter(curve)
 
-Destructively updates the endpoints of each curve segment, based on the λ values.
+Computes the parameter where the given cubic curve takes its largest curvature value.
 """
-function update_endpoints!(c, λ, closed, ::Val{true})
-    n = length(c)
-    for i in 1:n
-        ip = mod1(i + 1, n)
-        if closed || i < n
-            c[i][3] = (1 - λ[i]) * c[i][2] + λ[i] * c[ip][2]
-        end
-        if closed || ip > 1
-            c[ip][1] = c[i][3]
+function compute_parameter(curve)
+    # TODO: just sampling for now
+    t = 0
+    max = 0
+    for u in 0:0.01:1
+        c = abs(bezier_curvature(curve, u))
+        if c > max
+            max = c
+            t = u
         end
     end
+    t
 end
 
 """
-    compute_lambdas(c, closed, Val(true))
-
-Computes λ values based on control point triangle areas.
-"""
-function compute_lambdas(c, closed, ::Val{true})
-    n = length(c)
-    map(1:n) do i
-        !closed && i == n && return 0 # not used
-        ip = mod1(i + 1, n)
-        tmp = sqrt(abs(Δ(c[i][1], c[i][2], c[ip][2])))
-        denom = (tmp + sqrt(abs(Δ(c[i][2], c[ip][2], c[ip][3]))))
-        if denom < 1e-10
-            denom += 1e-10
-        end
-        tmp / denom
-    end
-end
-
-"""
-    compute_parameter(curve, p, Val(true))
-
-Computes the parameter where the given quadratic curve takes its largest curvature value.
-`p` is a point to interpolate.
-"""
-function compute_parameter(curve, p, ::Val{true})
-    a = [-norm(curve[1] - p) ^ 2,
-         dot(3 * curve[1] - 2 * p - curve[3], curve[1] - p),
-         3 * dot(curve[3] - curve[1], curve[1] - p),
-         norm(curve[3] - curve[1]) ^ 2]
-    solve_cubic(a)
-end
-
-"""
-    compute_central_cps(c, λ, t, points, closed, Val(true))
+    compute_central_cps(c, λ, t, points, closed, alpha)
 
 Computes the "central" control points of the cubic Bezier curves `c`
 in such a way that `c(t[i]) = points[i]`, where `points` is a matrix of size `(n, 2)`.
 The control points satisfy `c[i][3] = (1-λ[i]) c[i][2] + λ[i] c[i+1][2]`.
 The result is also a matrix of size `(n, 2)`.
 """
-function compute_central_cps(c, λ, t, points, closed, ::Val{true})
+function compute_central_cps(c, λ, t, points, closed, alpha)
     n = length(c)
     A = zeros(n, n)
     fixed = zeros(n, 2)
@@ -374,21 +353,28 @@ function compute_central_cps(c, λ, t, points, closed, ::Val{true})
         im = mod1(i - 1, n)
         ip = mod1(i + 1, n)
         if closed || i > 1
-            A[i,im] = (1 - λ[im]) * (1 - t[i]) ^ 2
+            A[i,im] = (1 - λ[im]) * ((1 - t[i]) ^ 3 + 3 * (1 - t[i]) ^ 2 * t[i] * (1 - alpha))
         else
-            fixed[1,:] -= c[1][1] * (1 - t[i]) ^ 2
+            fixed[1,:] -= c[1][1] * ((1 - t[i]) ^ 3 + 3 * (1 - t[i]) ^ 2 * t[i] * (1 - alpha))
         end
         if closed || i < n
-            A[i,ip] = λ[i] * t[i] ^ 2
+            A[i,ip] = λ[i] * (t[i] ^ 3 + 3 * (1 - t[i]) * t[i] ^ 2 * (1 - alpha))
         else
-            fixed[n,:] -= c[n][3] * t[i] ^ 2
+            fixed[n,:] -= c[n][3] * (t[i] ^ 3 + 3 * (1 - t[i]) * t[i] ^ 2 * (1 - alpha))
         end
         if closed || 1 < i < n
-            A[i,i] = λ[im] * (1 - t[i]) ^ 2 + (2 - (1 + λ[i]) * t[i]) * t[i]
+            A[i,i] =
+                λ[im] * ((1 - t[i]) ^ 3 + 3 * (1 - t[i]) ^ 2 * t[i] * (1 - alpha)) +
+                (1 - λ[i]) * (t[i] ^ 3 + 3 * (1 - t[i]) * t[i] ^ 2 * (1 - alpha)) +
+                alpha * 3 * (1 - t[i]) * t[i]
         elseif i == 1
-            A[i,i] = (2 - (1 + λ[i]) * t[i]) * t[i]
+            A[i,i] =
+                (1 - λ[i]) * (t[i] ^ 3 + 3 * (1 - t[i]) * t[i] ^ 2 * (1 - alpha)) +
+                alpha * 3 * (1 - t[i]) * t[i]
         else # i == n
-            A[i,i] = λ[im] * (1 - t[i]) ^ 2 + 2 * (1 - t[i]) * t[i]
+            A[i,i] =
+                λ[im] * ((1 - t[i]) ^ 3 + 3 * (1 - t[i]) ^ 2 * t[i] * (1 - alpha)) +
+                alpha * 3 * (1 - t[i]) * t[i]
         end
     end
     A \ (points + fixed)
@@ -489,7 +475,7 @@ end
 
 function generate_curve()
     length(points) < 3 && return
-    cpts, t = interpolate(points, closed=closed_curve, cubic=cubic_curve)
+    cpts, t = interpolate(points, closed=closed_curve, cubic=cubic_curve, alpha=alpha)
     if cubic_curve
         cpts = map(c -> create_cubic(c, alpha), cpts)
     end
