@@ -28,6 +28,7 @@ rectangle_scale = 1.4
 # GUI variables
 show_controls = false
 show_curvature = true
+just_curve = false
 closed_curve = true
 cubic_curve = false
 alpha = 2/3
@@ -516,7 +517,7 @@ draw_callback = @guarded (canvas) -> begin
     # Graphics.set_line_width(ctx, 1.0)
     # draw_polygon(ctx, points, closed_curve)
 
-    if show_controls
+    if !just_curve && show_controls
         # Control polygon
         Graphics.set_source_rgb(ctx, 1, 0, 1)
         Graphics.set_line_width(ctx, 2.0)
@@ -527,6 +528,8 @@ draw_callback = @guarded (canvas) -> begin
     Graphics.set_source_rgb(ctx, 0.8, 0.3, 0)
     Graphics.set_line_width(ctx, 2.0)
     draw_polygon(ctx, curve, closed_curve)
+
+    just_curve && return
 
     # Curvature comb
     if show_curvature
@@ -580,7 +583,14 @@ function clear_variables!()
 end
 
 function generate_curve()
-    length(points) < 3 && return
+    if length(points) < 3
+        if length(points) == 2
+            global controls = [points[1], (points[1] + points[2]) / 2, points[2]]
+            global curve = [points[1], points[2]]
+            global curvature = [0, 0]
+        end
+        return
+    end
     cpts, t = interpolate(points, closed=closed_curve, cubic=cubic_curve, alpha=alpha)
     if cubic_curve
         cpts = map(c -> create_cubic(c, alpha), cpts)
@@ -735,6 +745,15 @@ function setup_gui()
         global incremental = false
     end
     push!(hbox, load)
+
+    # Just curve checkbox
+    just = GtkCheckButton("Show only the curve")
+    just.active[Bool] = just_curve
+    signal_connect(just, "toggled") do cb
+        global just_curve = cb.active[Bool]
+        draw(canvas)
+    end
+    push!(hbox, just)
 
     generate_curve()
     showall(win)
