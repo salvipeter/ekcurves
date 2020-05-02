@@ -12,8 +12,8 @@ maxiter = 1000
 distance_tolerance = 1e-4
 warn_for_convergence_failure = false
 # [Cubic t-update parameters]
-relaxation = 0.1
-newton_iterations = 100
+relaxation = 0.15
+newton_iterations = 1000
 newton_tolerance = 1e-4
 
 # GUI parameters
@@ -27,9 +27,11 @@ rectangle_scale = 1.4
 
 # GUI variables
 show_controls = false
+show_curvature = true
 closed_curve = true
 cubic_curve = false
 alpha = 2/3
+incremental = false
 
 # Global variables
 points = []
@@ -37,6 +39,9 @@ controls = []
 curve = []
 curvature = []
 max_curvatures = []
+
+# Designs
+designs = ["bear", "deer", "elephant", "bird", "plane", "pumpkin", "rose"]
 
 
 # Interpolation
@@ -327,7 +332,7 @@ end
 Computes the first two derivatives of the curvature at `u`.
 """
 function bezier_curvature_derivatives(curve, u)
-    (_, d1, d2, d3, d4) = bezier_eval(curve, u, 4)
+    _, d1, d2, d3, d4 = bezier_eval(curve, u, 4)
 
     d1d2 = dot(d1, d2)
     d1d3 = dot(d1, d3)
@@ -444,6 +449,37 @@ function create_cubic(points, ratio)
 end
 
 
+# I/O
+
+function load_design(filename)
+    open_curves = []
+    closed_curves = []
+
+    read_point(f) = map(s -> parse(Float64, s), split(readline(f)))
+    function read_curve(f)
+        cpts = []
+        n = parse(Int, readline(f))
+        for i in 1:n
+            push!(cpts, read_point(f))
+        end
+        cpts
+    end
+
+    open(filename) do f
+        n = parse(Int, readline(f))
+        for i in 1:n
+            push!(closed_curves, read_curve(f))
+        end
+        n = parse(Int, readline(f))
+        for i in 1:n
+            push!(open_curves, read_curve(f))
+        end
+    end
+
+    (open_curves, closed_curves)
+end
+
+
 # Graphics
 
 function draw_polygon(ctx, poly, closep = false)
@@ -464,10 +500,12 @@ end
 draw_callback = @guarded (canvas) -> begin
     ctx = Graphics.getgc(canvas)
 
-    # White background
-    Graphics.rectangle(ctx, 0, 0, Graphics.width(canvas), Graphics.height(canvas))
-    Graphics.set_source_rgb(ctx, 1, 1, 1)
-    Graphics.fill(ctx)
+    if !incremental
+        # White background
+        Graphics.rectangle(ctx, 0, 0, Graphics.width(canvas), Graphics.height(canvas))
+        Graphics.set_source_rgb(ctx, 1, 1, 1)
+        Graphics.fill(ctx)
+    end
 
     # Input polygon
     # Graphics.set_source_rgb(ctx, 1, 0, 0)
@@ -487,21 +525,23 @@ draw_callback = @guarded (canvas) -> begin
     draw_polygon(ctx, curve, closed_curve)
 
     # Curvature comb
-    Graphics.set_source_rgb(ctx, 0, 0, 1)
-    Graphics.set_line_width(ctx, 1.0)
-    draw_polygon(ctx, curvature, closed_curve)
-    for i in 1:length(curvature)
-        i % curvature_sparsity != 1 && i != length(curvature) && continue
-        Graphics.new_path(ctx)
-        Graphics.move_to(ctx, curve[i][1], curve[i][2])
-        Graphics.line_to(ctx, curvature[i][1], curvature[i][2])
-        Graphics.stroke(ctx)
+    if show_curvature
+        Graphics.set_source_rgb(ctx, 0, 0, 1)
+        Graphics.set_line_width(ctx, 1.0)
+        draw_polygon(ctx, curvature, closed_curve)
+        for i in 1:length(curvature)
+            i % curvature_sparsity != 1 && i != length(curvature) && continue
+            Graphics.new_path(ctx)
+            Graphics.move_to(ctx, curve[i][1], curve[i][2])
+            Graphics.line_to(ctx, curvature[i][1], curvature[i][2])
+            Graphics.stroke(ctx)
+        end
     end
 
     # Maximum curvature points
     for p in max_curvatures[1:end]
         Graphics.set_source_rgb(ctx, 1, 0, 0)
-        Graphics.arc(ctx, p[1], p[2], point_size, 0, 2pi)
+        Graphics.arc(ctx, p[1], p[2], point_size - 1, 0, 2pi)
         Graphics.fill(ctx)
     end
 
@@ -511,6 +551,7 @@ draw_callback = @guarded (canvas) -> begin
         Graphics.arc(ctx, p[1], p[2], point_size, 0, 2pi)
         Graphics.fill(ctx)
         Graphics.set_source_rgb(ctx, 0, 0, 0)
+        Graphics.set_line_width(ctx, 1.0)
         rect = [p + [-point_size, -point_size] * rectangle_scale,
                 p + [-point_size,  point_size] * rectangle_scale,
                 p + [ point_size,  point_size] * rectangle_scale,
@@ -521,6 +562,14 @@ end
 
 
 # GUI
+
+function clear_variables!()
+    global points = []
+    global controls = []
+    global curve = []
+    global curvature = []
+    global max_curvatures = []
+end
 
 function generate_curve()
     length(points) < 3 && return
@@ -579,25 +628,31 @@ function setup_gui()
     # Reset button
     reset = GtkButton("Start Over")
     signal_connect(reset, "clicked") do _
-        global points = []
-        global curve = []
-        global curvature = []
-        global max_curvatures = []
+        clear_variables!()
         draw(canvas)
     end
     hbox = GtkBox(:h)
-    hbox.spacing[Int] = 10
+    hbox.spacing[Int] = 5
     push!(vbox, hbox)
     push!(hbox, reset)
 
     # Show controls checkbox
-    controlsp = GtkCheckButton("Show controls")
+    controlsp = GtkCheckButton("Controls")
     controlsp.active[Bool] = show_controls
     signal_connect(controlsp, "toggled") do cb
         global show_controls = cb.active[Bool]
         draw(canvas)
     end
     push!(hbox, controlsp)
+
+    # Show curvature checkbox
+    curvaturep = GtkCheckButton("Curvature")
+    curvaturep.active[Bool] = show_curvature
+    signal_connect(curvaturep, "toggled") do cb
+        global show_curvature = cb.active[Bool]
+        draw(canvas)
+    end
+    push!(hbox, curvaturep)
 
     # Closed checkbox
     closedp = GtkCheckButton("Closed curve")
@@ -622,10 +677,10 @@ function setup_gui()
     hbox = GtkBox(:h)
     push!(vbox, hbox)
 
-    # Alpha slider
+    # Alpha choices
     push!(hbox, GtkLabel("Alpha: "))
-    choices = ["0.1", "0.2", "1/3", "0.5", "2/3", "0.8", "0.9"]
-    choices_float = [0.1, 0.2, 1/3, 0.5, 2/3, 0.8, 0.9]
+    choices = ["2/3", "0.7", "0.75", "0.8", "0.85", "0.9", "0.95"]
+    choices_float = [2/3, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95]
     radios = [GtkRadioButton(choice) for choice in choices]
     for r in radios
         r.group[GtkRadioButton] = radios[1]
@@ -637,7 +692,41 @@ function setup_gui()
         end
         push!(hbox, r)
     end
-    radios[5].active[Bool] = true
+    radios[1].active[Bool] = true
+
+    hbox = GtkBox(:h)
+    hbox.spacing[Int] = 10
+    push!(vbox, hbox)
+
+    # Loading designs
+    push!(hbox, GtkLabel("Select design:"))
+    combo = GtkComboBoxText()
+    foreach(d -> push!(combo, d), designs)
+    combo.active[Int] = 1
+    push!(hbox, combo)
+    load = GtkButton("Load")
+    signal_connect(load, "clicked") do _
+        i = combo.active[Int] + 1
+        open_curves, closed_curves = load_design("$(designs[i]).pts")
+        old_closed = closed_curve
+        global incremental = true
+        global closed_curve = true
+        for c in closed_curves
+            global points = c
+            generate_curve()
+            draw(canvas)
+        end
+        global closed_curve = false
+        for c in open_curves
+            global points = c
+            generate_curve()
+            draw(canvas)
+        end
+        clear_variables!()
+        global closed_curve = old_closed
+        global incremental = false
+    end
+    push!(hbox, load)
 
     generate_curve()
     showall(win)
