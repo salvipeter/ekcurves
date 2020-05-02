@@ -727,6 +727,8 @@ function setup_gui()
         i = combo.active[Int] + 1
         open_curves, closed_curves = load_design("$(designs[i]).pts")
         old_closed = closed_curve
+        clear_variables!()
+        draw(canvas)
         global incremental = true
         global closed_curve = true
         for c in closed_curves
