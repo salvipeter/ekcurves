@@ -213,6 +213,8 @@ function compute_central_cps(c, λ, t, points, closed)
         end
         if closed || 1 < i < n
             A[i,i] = λ[im] * (1 - t[i]) ^ 2 + (2 - (1 + λ[i]) * t[i]) * t[i]
+        elseif n == 1
+            A[i,i] = 2 * (1 - t[i]) * t[i]
         elseif i == 1
             A[i,i] = (2 - (1 + λ[i]) * t[i]) * t[i]
         else # i == n
@@ -421,6 +423,8 @@ function compute_central_cps(c, λ, t, points, closed, alpha)
                 λ[im] * ((1 - t[i]) ^ 3 + 3 * (1 - t[i]) ^ 2 * t[i] * (1 - alpha)) +
                 (1 - λ[i]) * (t[i] ^ 3 + 3 * (1 - t[i]) * t[i] ^ 2 * (1 - alpha)) +
                 alpha * 3 * (1 - t[i]) * t[i]
+        elseif n == 1
+            A[i,i] = alpha * 3 * (1 - t[i]) * t[i]
         elseif i == 1
             A[i,i] =
                 (1 - λ[i]) * (t[i] ^ 3 + 3 * (1 - t[i]) * t[i] ^ 2 * (1 - alpha)) +
@@ -538,18 +542,22 @@ draw_callback = @guarded (canvas) -> begin
         end
     end
 
-    # Maximum curvature points
-    for p in max_curvatures[1:end]
-        Graphics.set_source_rgb(ctx, 1, 0, 0)
-        Graphics.arc(ctx, p[1], p[2], point_size - 1, 0, 2pi)
-        Graphics.fill(ctx)
+    if show_curvature
+        # Maximum curvature points
+        for p in max_curvatures[1:end]
+            Graphics.set_source_rgb(ctx, 1, 0, 0)
+            Graphics.arc(ctx, p[1], p[2], point_size - 1, 0, 2pi)
+            Graphics.fill(ctx)
+        end
     end
 
     # Input points
     for p in points[1:end]
-        Graphics.set_source_rgb(ctx, 0, 1, 0)
-        Graphics.arc(ctx, p[1], p[2], point_size, 0, 2pi)
-        Graphics.fill(ctx)
+        if show_curvature
+            Graphics.set_source_rgb(ctx, 0, 1, 0)
+            Graphics.arc(ctx, p[1], p[2], point_size, 0, 2pi)
+            Graphics.fill(ctx)
+        end
         Graphics.set_source_rgb(ctx, 0, 0, 0)
         Graphics.set_line_width(ctx, 1.0)
         rect = [p + [-point_size, -point_size] * rectangle_scale,
