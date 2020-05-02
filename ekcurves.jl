@@ -587,7 +587,7 @@ function generate_curve()
         if length(points) == 2
             global controls = [points[1], (points[1] + points[2]) / 2, points[2]]
             global curve = [points[1], points[2]]
-            global curvature = [0, 0]
+            global curvature = []
         end
         return
     end
