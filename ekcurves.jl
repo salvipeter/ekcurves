@@ -11,10 +11,6 @@ import Graphics
 maxiter = 1000
 distance_tolerance = 1e-4
 warn_for_convergence_failure = false
-# [Cubic t-update parameters]
-relaxation = 0.15
-newton_iterations = 1000
-newton_tolerance = 1e-4
 
 # GUI parameters
 width = 500
@@ -56,7 +52,6 @@ and `t` are the parameters of the interpolated points.
 """
 function interpolate(points; closed = true, cubic = false, alpha = 2/3)
     n = length(points) - (closed ? 0 : 2)
-    relax = cubic ? relaxation : 1
 
     c = map(p -> [nothing, p, nothing], closed ? points : points[2:end-1])
     if (!closed)
@@ -77,11 +72,16 @@ function interpolate(points; closed = true, cubic = false, alpha = 2/3)
     update_endpoints!(c, λ, closed)
 
     for iteration in 1:maxiter
-        λ = λ * (1 - relax) + compute_lambdas(c, closed) * relax
+        λ = compute_lambdas(c, closed)
         update_endpoints!(c, λ, closed)
         if cubic
-            t1 = map(i -> compute_parameter(create_cubic(c[i], alpha), t[i], true), 1:n)
-            t = t * (1 - relax) + t1 * relax
+            ratio = (2 - 3 * alpha) / 4
+            t = map(1:n) do i
+                cpts = [c[i][1],
+                        c[i][1] * ratio + c[i][2] * alpha * 3/2 + c[i][3] * ratio,
+                        c[i][3]]
+                compute_parameter(cpts, points[i])
+            end
         else
             t = map(i -> compute_parameter(c[i], points[i]), 1:n)
         end
@@ -103,7 +103,7 @@ function interpolate(points; closed = true, cubic = false, alpha = 2/3)
         max_deviation = 0
         for i in 1:n
             max_deviation = max(max_deviation, norm(x[i,:] - c[i][2]))
-            c[i][2] = c[i][2] * (1 - relax) + x[i,:] * relax
+            c[i][2] = x[i,:]
         end
 
         max_deviation < distance_tolerance && break
@@ -361,38 +361,6 @@ end
 
 
 # Cubic version
-
-"""
-    compute_parameter(curve, t, init)
-
-Computes the parameter where the given cubic curve takes its largest curvature value.
-The Newton iteration starts from `t`, unless `init` is `true`,
-in which case a search is done for a good starting parameter.
-"""
-function compute_parameter(curve, t, init)
-    # Find a starting parameter for the Newton iteration
-    if init
-        t = 0
-        max = 0
-        for u in 0:0.01:1
-            c = abs(bezier_curvature(curve, u))
-            if c > max
-                max = c
-                t = u
-            end
-        end
-    end
-
-    for _ in newton_iterations
-        t_old = t
-        fx, dfx = bezier_curvature_derivatives(curve, t)
-        (abs(fx) < newton_tolerance || abs(dfx) < newton_tolerance) && break
-        t -= fx / dfx
-        t = clamp(t, 0, 1)
-        t != 0 && abs((t - t_old) / t) < newton_tolerance && break
-    end
-    t
-end
 
 """
     compute_central_cps(c, λ, t, points, closed, alpha)
