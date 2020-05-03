@@ -75,13 +75,7 @@ function interpolate(points; closed = true, cubic = false, alpha = 2/3)
         λ = compute_lambdas(c, closed)
         update_endpoints!(c, λ, closed)
         if cubic
-            ratio = (2 - 3 * alpha) / 4
-            t = map(1:n) do i
-                cpts = [c[i][1],
-                        c[i][1] * ratio + c[i][2] * alpha * 3/2 + c[i][3] * ratio,
-                        c[i][3]]
-                compute_parameter(cpts, points[i])
-            end
+            t = map(i -> compute_parameter(c[i], points[i], alpha), 1:n)
         else
             t = map(i -> compute_parameter(c[i], points[i]), 1:n)
         end
@@ -361,6 +355,36 @@ end
 
 
 # Cubic version
+
+"""
+    compute_parameter(curve, p, alpha)
+
+Computes the parameter where the cubic curve created from the given quadratic one
+takes its largest curvature value.
+`p` is a point to interpolate. Uses second-degree approximation by Taylor series.
+"""
+function compute_parameter(curve, p, alpha)
+    # Maximal curvature parameter of the quadratic curve
+    tmp = curve[1] - 2 * curve[2] + curve[3]
+    t = dot(curve[1] - curve[2], tmp) / norm(tmp) ^ 2
+
+    # Create the cubic curve and evaluate with 2 derivatives
+    cpts = create_cubic(curve, alpha)
+    der = bezier_eval(cpts, t, 2)
+
+    # Taylor expansion around t, in Bernstein form
+    taylor = [der[1],
+              der[1] + der[2] / 2,
+              der[1] + der[2] + der[3] / 2]
+
+    # Reparameterization
+    # (since the Taylor expansion is around t, the curve is now in [-t, 1-t])
+    tmp1 = -t * (taylor[1] - 2 * taylor[2] + taylor[3])
+    tmp2 = 2 * t * (taylor[1] - taylor[2]) - t * tmp1
+    taylor += [tmp2, tmp1 + tmp2, 2 * tmp1 + tmp2]
+
+    compute_parameter(taylor, p)
+end
 
 """
     compute_central_cps(c, λ, t, points, closed, alpha)
