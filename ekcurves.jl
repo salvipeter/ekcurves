@@ -158,20 +158,20 @@ Computes the parameter where the given quadratic curve takes its largest curvatu
 `p` is a point to interpolate.
 """
 function compute_parameter(curve, p)
-    a = [-norm(curve[1] - p) ^ 2,
-         dot(3 * curve[1] - 2 * p - curve[3], curve[1] - p),
-         3 * dot(curve[3] - curve[1], curve[1] - p),
-         norm(curve[3] - curve[1]) ^ 2]
-    solve_cubic(a)
+    coeffs = [-norm(curve[1] - p) ^ 2,
+              dot(3 * curve[1] - 2 * p - curve[3], curve[1] - p),
+              3 * dot(curve[3] - curve[1], curve[1] - p),
+              norm(curve[3] - curve[1]) ^ 2]
+    unit_root(coeffs)
 end
 
 """
-    solve_cubic(a)
+    unit_root(coeffs)
 
-Solves the cubic equation, and chooses a real solution in `[0, 1]`.
-The coefficients are given in the order `[1, x, x^2, x^3]`.
+Finds a real root of the polynomial in `[0, 1]`.
+The coefficients are given in the order `[1, x, x^2, ...]`.
 """
-function solve_cubic(coeffs)
+function unit_root(coeffs)
     ϵ = 1e-8
     p = Polynomial(coeffs)
     x = roots(p)
@@ -364,26 +364,21 @@ takes its largest curvature value.
 `p` is a point to interpolate. Uses second-degree approximation by Taylor series.
 """
 function compute_parameter(curve, p, alpha)
-    # Maximal curvature parameter of the quadratic curve
-    tmp = curve[1] - 2 * curve[2] + curve[3]
-    t = dot(curve[1] - curve[2], tmp) / norm(tmp) ^ 2
-
-    # Create the cubic curve and evaluate with 2 derivatives
-    cpts = create_cubic(curve, alpha)
-    der = bezier_eval(cpts, t, 2)
-
-    # Taylor expansion around t, in Bernstein form
-    taylor = [der[1],
-              der[1] + der[2] / 2,
-              der[1] + der[2] + der[3] / 2]
-
-    # Reparameterization
-    # (since the Taylor expansion is around t, the curve is now in [-t, 1-t])
-    tmp1 = -t * (taylor[1] - 2 * taylor[2] + taylor[3])
-    tmp2 = 2 * t * (taylor[1] - taylor[2]) - t * tmp1
-    taylor += [tmp2, tmp1 + tmp2, 2 * tmp1 + tmp2]
-
-    compute_parameter(taylor, p)
+    a = alpha
+    px, py = p
+    x0, y0 = curve[1]
+    x2, y2 = curve[3]
+    coeffs = [-4*px^2 + 3*a*px^2 - 4*py^2 + 3*a*py^2 + 8*px*x0 - 6*a*px*x0 - 4*x0^2 + 3*a*x0^2 + 8*py*y0 - 6*a*py*y0 - 4*y0^2 + 3*a*y0^2,
+              12*px^2 - 12*a*px^2 + 12*py^2 - 12*a*py^2 - 42*px*x0 + 60*a*px*x0 - 18*a^2*px*x0 + 30*x0^2 - 48*a*x0^2 + 18*a^2*x0^2 + 18*px*x2 - 36*a*px*x2 + 18*a^2*px*x2 - 18*x0*x2 + 36*a*x0*x2 - 18*a^2*x0*x2 - 42*py*y0 + 60*a*py*y0 - 18*a^2*py*y0 + 30*y0^2 - 48*a*y0^2 + 18*a^2*y0^2 + 18*py*y2 - 36*a*py*y2 + 18*a^2*py*y2 - 18*y0*y2 + 36*a*y0*y2 - 18*a^2*y0*y2,
+              -12*px^2 + 18*a*px^2 - 12*py^2 + 18*a*py^2 + 138*px*x0 - 294*a*px*x0 + 144*a^2*px*x0 - 126*x0^2 + 276*a*x0^2 - 144*a^2*x0^2 - 114*px*x2 + 258*a*px*x2 - 144*a^2*px*x2 + 114*x0*x2 - 258*a*x0*x2 + 144*a^2*x0*x2 + 138*py*y0 - 294*a*py*y0 + 144*a^2*py*y0 - 126*y0^2 + 276*a*y0^2 - 144*a^2*y0^2 - 114*py*y2 + 258*a*py*y2 - 144*a^2*py*y2 + 114*y0*y2 - 258*a*y0*y2 + 144*a^2*y0*y2,
+              8*px^2 - 12*a*px^2 + 8*py^2 - 12*a*py^2 - 288*px*x0 + 732*a*px*x0 - 450*a^2*px*x0 + 334*x0^2 - 882*a*x0^2 + 612*a^2*x0^2 - 54*a^3*x0^2 + 272*px*x2 - 708*a*px*x2 + 450*a^2*px*x2 - 380*x0*x2 + 1032*a*x0*x2 - 774*a^2*x0*x2 + 108*a^3*x0*x2 + 54*x2^2 - 162*a*x2^2 + 162*a^2*x2^2 - 54*a^3*x2^2 - 288*py*y0 + 732*a*py*y0 - 450*a^2*py*y0 + 334*y0^2 - 882*a*y0^2 + 612*a^2*y0^2 - 54*a^3*y0^2 + 272*py*y2 - 708*a*py*y2 + 450*a^2*py*y2 - 380*y0*y2 + 1032*a*y0*y2 - 774*a^2*y0*y2 + 108*a^3*y0*y2 + 54*y2^2 - 162*a*y2^2 + 162*a^2*y2^2 - 54*a^3*y2^2,
+              360*px*x0 - 1020*a*px*x0 + 720*a^2*px*x0 - 630*x0^2 + 1965*a*x0^2 - 1800*a^2*x0^2 + 405*a^3*x0^2 - 360*px*x2 + 1020*a*px*x2 - 720*a^2*px*x2 + 900*x0*x2 - 2910*a*x0*x2 + 2880*a^2*x0*x2 - 810*a^3*x0*x2 - 270*x2^2 + 945*a*x2^2 - 1080*a^2*x2^2 + 405*a^3*x2^2 + 360*py*y0 - 1020*a*py*y0 + 720*a^2*py*y0 - 630*y0^2 + 1965*a*y0^2 - 1800*a^2*y0^2 + 405*a^3*y0^2 - 360*py*y2 + 1020*a*py*y2 - 720*a^2*py*y2 + 900*y0*y2 - 2910*a*y0*y2 + 2880*a^2*y0*y2 - 810*a^3*y0*y2 - 270*y2^2 + 945*a*y2^2 - 1080*a^2*y2^2 + 405*a^3*y2^2,
+              -264*px*x0 + 792*a*px*x0 - 594*a^2*px*x0 + 900*x0^2 - 3246*a*x0^2 + 3708*a^2*x0^2 - 1296*a^3*x0^2 + 264*px*x2 - 792*a*px*x2 + 594*a^2*px*x2 - 1536*x0*x2 + 5700*a*x0*x2 - 6822*a^2*x0*x2 + 2592*a^3*x0*x2 + 636*x2^2 - 2454*a*x2^2 + 3114*a^2*x2^2 - 1296*a^3*x2^2 - 264*py*y0 + 792*a*py*y0 - 594*a^2*py*y0 + 900*y0^2 - 3246*a*y0^2 + 3708*a^2*y0^2 - 1296*a^3*y0^2 + 264*py*y2 - 792*a*py*y2 + 594*a^2*py*y2 - 1536*y0*y2 + 5700*a*y0*y2 - 6822*a^2*y0*y2 + 2592*a^3*y0*y2 + 636*y2^2 - 2454*a*y2^2 + 3114*a^2*y2^2 - 1296*a^3*y2^2,
+              88*px*x0 - 264*a*px*x0 + 198*a^2*px*x0 - 968*x0^2 + 3912*a*x0^2 - 5202*a^2*x0^2 + 2268*a^3*x0^2 - 88*px*x2 + 264*a*px*x2 - 198*a^2*px*x2 + 1848*x0*x2 - 7560*a*x0*x2 + 10206*a^2*x0*x2 - 4536*a^3*x0*x2 - 880*x2^2 + 3648*a*x2^2 - 5004*a^2*x2^2 + 2268*a^3*x2^2 + 88*py*y0 - 264*a*py*y0 + 198*a^2*py*y0 - 968*y0^2 + 3912*a*y0^2 - 5202*a^2*y0^2 + 2268*a^3*y0^2 - 88*py*y2 + 264*a*py*y2 - 198*a^2*py*y2 + 1848*y0*y2 - 7560*a*y0*y2 + 10206*a^2*y0*y2 - 4536*a^3*y0*y2 - 880*y2^2 + 3648*a*y2^2 - 5004*a^2*y2^2 + 2268*a^3*y2^2,
+              744*x0^2 - 3240*a*x0^2 + 4698*a^2*x0^2 - 2268*a^3*x0^2 - 1488*x0*x2 + 6480*a*x0*x2 - 9396*a^2*x0*x2 + 4536*a^3*x0*x2 + 744*x2^2 - 3240*a*x2^2 + 4698*a^2*x2^2 - 2268*a^3*x2^2 + 744*y0^2 - 3240*a*y0^2 + 4698*a^2*y0^2 - 2268*a^3*y0^2 - 1488*y0*y2 + 6480*a*y0*y2 - 9396*a^2*y0*y2 + 4536*a^3*y0*y2 + 744*y2^2 - 3240*a*y2^2 + 4698*a^2*y2^2 - 2268*a^3*y2^2,
+              -360*x0^2 + 1620*a*x0^2 - 2430*a^2*x0^2 + 1215*a^3*x0^2 + 720*x0*x2 - 3240*a*x0*x2 + 4860*a^2*x0*x2 - 2430*a^3*x0*x2 - 360*x2^2 + 1620*a*x2^2 - 2430*a^2*x2^2 + 1215*a^3*x2^2 - 360*y0^2 + 1620*a*y0^2 - 2430*a^2*y0^2 + 1215*a^3*y0^2 + 720*y0*y2 - 3240*a*y0*y2 + 4860*a^2*y0*y2 - 2430*a^3*y0*y2 - 360*y2^2 + 1620*a*y2^2 - 2430*a^2*y2^2 + 1215*a^3*y2^2,
+              80*x0^2 - 360*a*x0^2 + 540*a^2*x0^2 - 270*a^3*x0^2 - 160*x0*x2 + 720*a*x0*x2 - 1080*a^2*x0*x2 + 540*a^3*x0*x2 + 80*x2^2 - 360*a*x2^2 + 540*a^2*x2^2 - 270*a^3*x2^2 + 80*y0^2 - 360*a*y0^2 + 540*a^2*y0^2 - 270*a^3*y0^2 - 160*y0*y2 + 720*a*y0*y2 - 1080*a^2*y0*y2 + 540*a^3*y0*y2 + 80*y2^2 - 360*a*y2^2 + 540*a^2*y2^2 - 270*a^3*y2^2]
+    unit_root(coeffs)
 end
 
 """
