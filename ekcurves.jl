@@ -26,7 +26,7 @@ show_controls = false
 show_curvature = true
 just_curve = false
 closed_curve = true
-cubic_curve = false
+curve_type = 0
 alpha = 2/3
 incremental = false
 
@@ -578,10 +578,26 @@ function generate_curve()
         end
         return
     end
-    cpts, t = interpolate(points, closed=closed_curve, cubic=cubic_curve, alpha=alpha)
-    if cubic_curve
+
+    local cpts
+    local t
+    if curve_type == 0
+        # Original quadratic
+        cpts, t = interpolate(points, closed=closed_curve, cubic=false)
+    elseif curve_type == 1
+        # Cubic
+        cpts, t = interpolate(points, closed=closed_curve, cubic=true, alpha=alpha)
         cpts = map(c -> create_cubic(c, alpha), cpts)
+    elseif curve_type == 2
+        # Trigonometric A
+        # TODO
+        return
+    elseif curve_type == 3
+        # Trigonometric B
+        # TODO
+        return
     end
+
     global controls = vcat(cpts...)
     global curve = []
     global curvature = []
@@ -670,34 +686,52 @@ function setup_gui()
     push!(hbox, closedp)
 
     # Cubic checkbox
-    cubicp = GtkCheckButton("Cubic")
-    cubicp.active[Bool] = cubic_curve
-    signal_connect(cubicp, "toggled") do cb
-        global cubic_curve = cb.active[Bool]
-        generate_curve()
-        draw(canvas)
-    end
-    push!(hbox, cubicp)
+    changetype = GtkComboBoxText()
+    curve_types = ["Original", "Cubic", "Trig. A", "Trig. B"]
+    foreach(t -> push!(changetype, t), curve_types)
+    changetype.active[Int] = curve_type
+    push!(hbox, changetype)
 
     hbox = GtkBox(:h)
     push!(vbox, hbox)
 
     # Alpha choices
     push!(hbox, GtkLabel("Alpha: "))
-    choices = ["2/3", "0.7", "0.75", "0.8", "0.85", "0.9", "0.95"]
-    choices_float = [2/3, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95]
-    radios = [GtkRadioButton(choice) for choice in choices]
+    radios = [GtkRadioButton("N/A") for _ in 1:7]
+    function alpha_handler(r)
+        !r.active[Bool] && return
+        if curve_type != 0      # do not update for N/A
+            global alpha = float(eval(Meta.parse(r.label[String])))
+        end
+        generate_curve()
+        draw(canvas)
+    end
     for r in radios
         r.group[GtkRadioButton] = radios[1]
-        signal_connect(r, "toggled") do _
-            !r.active[Bool] && return
-            global alpha = choices_float[findfirst(rb -> rb === r, radios)]
-            generate_curve()
-            draw(canvas)
-        end
+        signal_connect(alpha_handler, r, "toggled")
         push!(hbox, r)
     end
     radios[1].active[Bool] = true
+
+    # Update alphas based on curve type
+    alpha_choices =
+        [["N/A", "N/A", "N/A", "N/A", "N/A", "N/A", "N/A"],
+         ["2/3", "0.7", "0.75", "0.8", "0.85", "0.9", "0.95"],
+         ["0.5", "0.6", "0.7", "0.75", "0.8", "0.9", "1"],
+         ["0", "0.5", "0.75", "1", "1.25", "1.5", "2"]]
+    signal_connect(changetype, "changed") do _
+        i = changetype.active[Int]
+        global curve_type = i
+        ac = alpha_choices[i+1]
+        for j in 1:length(ac)
+            radios[j].label[String] = ac[j]
+            if radios[j].active[Bool]
+                alpha_handler(radios[j])
+            end
+        end
+        generate_curve()
+        draw(canvas)
+    end
 
     hbox = GtkBox(:h)
     hbox.spacing[Int] = 10
@@ -707,7 +741,7 @@ function setup_gui()
     push!(hbox, GtkLabel("Select design:"))
     combo = GtkComboBoxText()
     foreach(d -> push!(combo, d), designs)
-    combo.active[Int] = 1
+    combo.active[Int] = 0
     push!(hbox, combo)
     load = GtkButton("Load")
     signal_connect(load, "clicked") do _
