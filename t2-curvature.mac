@@ -4,14 +4,21 @@
  Input:
    (x0,y0) and (x2,y2) - the endpoints
    (px,py)             - the point to interpolate at the maximal curvature
-   a                   - alpha, the ratio for the conversion between quadratic & cubic
+   r                   - alpha, the ratio for the conversion between "linear" & "quadratic"
  Output:
-   <a 9th-degree polynomial in t, having one real solution in [0,1]>
+   ...?
  */
 
+exponentialize: true$ /* Automatically convert trigonemetric functions to exponential form */
+S: sin(%pi*t/2)$
+C: cos(%pi*t/2)$
+a: 1-(1-r)*S^2-r*S$
+b: r*(S+C-1)$
+c: 1-(1-r)*C^2-r*C$
+
 /* (cx,cy) is the curve, (dx,dy) and (ddx,ddy) are the 1st and 2nd derivatives */
-cx: (1-t)^3*x0+3*(1-t)^2*t*((1-a)*x0+a*x1)+3*(1-t)*t^2*((1-a)*x2+a*x1)+t^3*x2$
-cy: (1-t)^3*y0+3*(1-t)^2*t*((1-a)*y0+a*y1)+3*(1-t)*t^2*((1-a)*y2+a*y1)+t^3*y2$
+cx: a*x0+b*x1+c*x2$
+cy: a*y0+b*y1+c*y2$
 dx: diff(cx,t)$
 dy: diff(cy,t)$
 ddx: diff(dx,t)$
@@ -22,14 +29,15 @@ n: dx*ddy-ddx*dy$
 d: (dx^2+dy^2)^(3/2)$
 
 /* The numerator of the curvature's derivative; we need to solve dk = 0 */
-dk: diff(n,t)*d-n*diff(d,t)$
+dk: diff(n,t)-n*3/2*diff(dx^2+dy^2,t)$
+dk1: factor(1024*dk/-(3*%pi^4*r*%e^-((7*%i*%pi*t)/2)*(x1*y2-x0*y2-x2*y1+x0*y1+x2*y0-x1*y0)))$
+
 /* Looking at factor(dk), we can see that there is some room for simplification */
-dk1: factor(dk/(162*a*(x1*y2-x0*y2-x2*y1+x0*y1+x2*y0-x1*y0)*sqrt(dx^2+dy^2)))$
 solution: rhs(solve(dk1,t)[1])$
 
 /* (x1,y1) is set s.t. the curve interpolates (px,py) */
-x1: (px-((1-t)^3+3*(1-t)^2*t*(1-a))*x0-(3*(1-t)*t^2*(1-a)+t^3)*x2)/(3*(1-t)*t*a)$
-y1: (py-((1-t)^3+3*(1-t)^2*t*(1-a))*y0-(3*(1-t)*t^2*(1-a)+t^3)*y2)/(3*(1-t)*t*a)$
+x1: (px-a*x0-c*x2)/b$
+y1: (py-a*y0-c*y2)/b$
 
 /* Generate a string representation that can be inserted in a program */
 display2d: false$ /* programming-friendly output */

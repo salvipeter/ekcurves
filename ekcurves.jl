@@ -6,6 +6,8 @@ using Polynomials: Polynomial, roots
 using Gtk
 import Graphics
 
+include("trig-coeffs.jl")
+
 
 # Parameters
 maxiter = 1000
@@ -290,7 +292,7 @@ Evaluates a Bezier curve, given by its control points, at the parameter `u`.
 function bezier_eval(curve, u)
     n = length(curve) - 1
     coeff = bernstein(n, u)
-    mapreduce(k -> curve[k] * coeff[k], +, 1:n+1)
+    sum(curve .* coeff)
 end
 
 """
@@ -305,7 +307,7 @@ function bezier_eval(curve, u, d)
     coeff = bernstein_all(n, u)
     dcp = bezier_derivative_controls(curve, du)
     for k in 0:du
-        push!(result, mapreduce(j -> dcp[k+1][j] * coeff[n-k+1][j], +, 1:n-k+1))
+        push!(result, sum(dcp[k+1] .* coeff[n-k+1]))
     end
     for k in n+1:d
         push!(result, [0, 0])
@@ -439,6 +441,137 @@ function create_cubic(points, ratio)
      points[2] * ratio + points[3] * (1 - ratio),
      points[3]]
 end
+
+
+# Interpolation with trigonometric curves
+
+function interpolate_trig_b(points; closed = true, alpha = 1)
+    n = length(points) - (closed ? 0 : 2)
+
+    c = map(p -> [nothing, p, nothing], closed ? points : points[2:end-1])
+    if (!closed)
+        c[1][1] = points[1]
+        c[n][3] = points[end]
+        points = points[2:end-1]
+    end
+
+    λ = fill(0.5, n)
+    t = Vector{Float64}(undef, n)
+
+    # Setup right-hand side for the linear equation system
+    rhs = Matrix{Float64}(undef, n, 2)
+    for i in 1:n
+        rhs[i,:] = points[i]
+    end
+
+    update_endpoints!(c, λ, closed)
+
+    for iteration in 1:maxiter
+        λ = compute_lambdas(c, closed)
+        update_endpoints!(c, λ, closed)
+        t = [compute_parameter_trig_b(c[i], points[i], alpha) for i in 1:n]
+
+        if iteration == maxiter
+            max_error = maximum(1:n) do i
+                norm(trig_b_eval(c[i], t[i], alpha, 0) - points[i])
+            end
+            warn_for_convergence_failure && @warn "Did not converge - err: $max_error"
+            break
+        end
+
+        x = compute_central_cps_trig_b(c, λ, t, rhs, closed, alpha)
+        max_deviation = 0
+        for i in 1:n
+            max_deviation = max(max_deviation, norm(x[i,:] - c[i][2]))
+            c[i][2] = x[i,:]
+        end
+
+        max_deviation < distance_tolerance && break
+    end
+
+    update_endpoints!(c, λ, closed)
+    (c, t)
+end
+
+function compute_parameter_trig_b(curve, p, alpha)
+    ϵ = 1e-8
+    coeffs = coeffs_trig_b(curve, p, alpha)
+    p = Polynomial(coeffs)
+    x = [log(r) * 2 / (im * π) for r in roots(p)]
+    for xi in x
+        abs(imag(xi)) < ϵ && -ϵ <= real(xi) <= 1 + ϵ && return clamp(real(xi), 0, 1)
+    end
+    @error "No suitable solution"
+end
+
+function compute_central_cps_trig_b(c, λ, t, points, closed, alpha)
+    n = length(c)
+    A = zeros(n, n)
+    fixed = zeros(n, 2)
+    for i in 1:n
+        im = mod1(i - 1, n)
+        ip = mod1(i + 1, n)
+        S = sin(π * t[i] / 2)
+        C = cos(π * t[i] / 2)
+        if closed || i > 1
+            A[i,im] = (1 + (alpha - 1) * S ^ 2 - alpha * S) * (1 - λ[im])
+        else
+            fixed[1,:] -= c[1][1] * (1 + (alpha - 1) * S ^ 2 - alpha * S)
+        end
+        if closed || i < n
+            A[i,ip] = (1 + (alpha - 1) * C ^ 2 - alpha * C) * λ[i]
+        else
+            fixed[n,:] -= c[n][3] * (1 + (alpha - 1) * C ^ 2 - alpha * C)
+        end
+        if closed || 1 < i < n
+            A[i,i] =
+                λ[im] * (1 + (alpha - 1) * S ^ 2 - alpha * S) +
+                alpha * (S + C - 1) +
+                (1 - λ[i]) * (1 + (alpha - 1) * C ^ 2 - alpha * C)
+        elseif n == 1
+            A[i,i] = alpha * (S + C - 1)
+        elseif i == 1
+            A[i,i] =
+                alpha * (S + C - 1) +
+                (1 - λ[i]) * (1 + (alpha - 1) * C ^ 2 - alpha * C)
+        else # i == n
+            A[i,i] =
+                λ[im] * (1 + (alpha - 1) * S ^ 2 - alpha * S) +
+                alpha * (S + C - 1)
+        end
+    end
+    A \ (points + fixed)
+end
+
+
+# Trigonometric curve evaluation
+
+function trig_b_eval(curve, alpha, u, d)
+    S = sin(π * u / 2)
+    C = cos(π * u / 2)
+    b = [1 - (1 - alpha) * S ^ 2 - alpha * S,
+         alpha * (S + C - 1),
+         1 - (1 - alpha) * C ^ 2 - alpha * C]
+    p = sum(curve .* b)
+    d == 0 && return p
+    der = [p]
+    db1 = [-π * (1 - alpha) * S * C - π / 2 * alpha * C,
+           π / 2 * alpha * (C - S),
+           π * (1 - alpha) * C * S + π / 2 * alpha * S]
+    push!(der, sum(curve .* db1))
+    d == 1 && return der
+    db2 = [π ^ 2 / 2 * (1 - alpha) * (S ^ 2 - C ^ 2) + π ^ 2 / 4 * alpha * S,
+           -alpha * π ^ 2 / 4 * (S + C),
+           π ^ 2 / 2 * (1 - alpha) * (C ^ 2 - S ^ 2) + π ^ 2 / 4 * alpha * C]
+    push!(der, sum(curve .* db2))
+    der
+end
+
+function trig_b_curvature(curve, alpha, u)
+    der = trig_b_eval(curve, alpha, u, 2)
+    det([der[2] der[3]]) / norm(der[2]) ^ 3
+end
+
 
 
 # I/O
@@ -579,23 +712,26 @@ function generate_curve()
         return
     end
 
-    local cpts
-    local t
+    local cpts, t, eval_fn, curvature_fn
+
     if curve_type == 0
         # Original quadratic
         cpts, t = interpolate(points, closed=closed_curve, cubic=false)
+        eval_fn, curvature_fn = bezier_eval, bezier_curvature
     elseif curve_type == 1
         # Cubic
         cpts, t = interpolate(points, closed=closed_curve, cubic=true, alpha=alpha)
         cpts = [create_cubic(c, alpha) for c in cpts]
+        eval_fn, curvature_fn = bezier_eval, bezier_curvature
     elseif curve_type == 2
         # Trigonometric A
         # TODO
         return
     elseif curve_type == 3
         # Trigonometric B
-        # TODO
-        return
+        cpts, t = interpolate_trig_b(points, closed=closed_curve, alpha=alpha)
+        eval_fn(curve, u, d=0) = trig_b_eval(curve, alpha, u, d)
+        curvature_fn(curve, u) = trig_b_curvature(curve, alpha, u)
     end
 
     global controls = vcat(cpts...)
@@ -603,15 +739,15 @@ function generate_curve()
     global curvature = []
     for c in cpts
         for u in range(0, stop=1, length=resolution) # endpoints are drawn twice
-            der = bezier_eval(c, u, 1)
+            der = eval_fn(c, u, 1)
             p = der[1]
             n = normalize([der[2][2], -der[2][1]])
-            k = bezier_curvature(c, u)
+            k = curvature_fn(c, u)
             push!(curve, p)
             push!(curvature, p + n * k * curvature_scaling)
         end
     end
-    global max_curvatures = [bezier_eval(cpts[i], t[i]) for i in 1:length(t)]
+    global max_curvatures = [eval_fn(cpts[i], t[i]) for i in 1:length(t)]
 end
 
 mousedown_handler = @guarded (canvas, event) -> begin
@@ -718,7 +854,7 @@ function setup_gui()
         [["N/A", "N/A", "N/A", "N/A", "N/A", "N/A", "N/A"],
          ["2/3", "0.7", "0.75", "0.8", "0.85", "0.9", "0.95"],
          ["0.5", "0.6", "0.7", "0.75", "0.8", "0.9", "1"],
-         ["0", "0.5", "0.75", "1", "1.25", "1.5", "2"]]
+         ["1", "1.2", "1.3", "1.4", "1.5", "1.6", "1.7"]]
     signal_connect(changetype, "changed") do _
         i = changetype.active[Int]
         global curve_type = i
