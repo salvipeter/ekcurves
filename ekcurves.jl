@@ -75,9 +75,9 @@ function interpolate(points; closed = true, cubic = false, alpha = 2/3)
         λ = compute_lambdas(c, closed)
         update_endpoints!(c, λ, closed)
         if cubic
-            t = map(i -> compute_parameter(c[i], points[i], alpha), 1:n)
+            t = [compute_parameter(c[i], points[i], alpha) for i in 1:n]
         else
-            t = map(i -> compute_parameter(c[i], points[i]), 1:n)
+            t = [compute_parameter(c[i], points[i]) for i in 1:n]
         end
 
         if iteration == maxiter
@@ -447,7 +447,7 @@ function load_design(filename)
     open_curves = []
     closed_curves = []
 
-    read_point(f) = map(s -> parse(Float64, s), split(readline(f)))
+    read_point(f) = [parse(Float64, s) for s in split(readline(f))]
     function read_curve(f)
         cpts = []
         n = parse(Int, readline(f))
@@ -587,7 +587,7 @@ function generate_curve()
     elseif curve_type == 1
         # Cubic
         cpts, t = interpolate(points, closed=closed_curve, cubic=true, alpha=alpha)
-        cpts = map(c -> create_cubic(c, alpha), cpts)
+        cpts = [create_cubic(c, alpha) for c in cpts]
     elseif curve_type == 2
         # Trigonometric A
         # TODO
@@ -611,7 +611,7 @@ function generate_curve()
             push!(curvature, p + n * k * curvature_scaling)
         end
     end
-    global max_curvatures = map(i -> bezier_eval(cpts[i], t[i]), 1:length(t))
+    global max_curvatures = [bezier_eval(cpts[i], t[i]) for i in 1:length(t)]
 end
 
 mousedown_handler = @guarded (canvas, event) -> begin
