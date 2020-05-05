@@ -445,7 +445,7 @@ end
 
 # Interpolation with trigonometric curves
 
-function interpolate_trig_b(points; closed = true, alpha = 1)
+function interpolate_trig(points; closed = true, quadratic = false, alpha = 1)
     n = length(points) - (closed ? 0 : 2)
 
     c = map(p -> [nothing, p, nothing], closed ? points : points[2:end-1])
@@ -469,17 +469,30 @@ function interpolate_trig_b(points; closed = true, alpha = 1)
     for iteration in 1:maxiter
         λ = compute_lambdas(c, closed)
         update_endpoints!(c, λ, closed)
-        t = [compute_parameter_trig_b(c[i], points[i], alpha) for i in 1:n]
+        if quadratic
+            t = [compute_parameter_trig_a(c[i], points[i], alpha) for i in 1:n]
+        else
+            t = [compute_parameter_trig_b(c[i], points[i], alpha) for i in 1:n]
+        end
 
         if iteration == maxiter
             max_error = maximum(1:n) do i
-                norm(trig_b_eval(c[i], t[i], alpha, 0) - points[i])
+                if quadratic
+                    cp = create_trig_quadratic(c[i], alpha)
+                    norm(trig_a_eval(cp, t[i]) - points[i])
+                else
+                    norm(trig_b_eval(c[i], t[i]) - points[i])
+                end
             end
             warn_for_convergence_failure && @warn "Did not converge - err: $max_error"
             break
         end
 
-        x = compute_central_cps_trig_b(c, λ, t, rhs, closed, alpha)
+        if quadratic
+            x = compute_central_cps_trig_a(c, λ, t, rhs, closed, alpha)
+        else
+            x = compute_central_cps_trig_b(c, λ, t, rhs, closed, alpha)
+        end
         max_deviation = 0
         for i in 1:n
             max_deviation = max(max_deviation, norm(x[i,:] - c[i][2]))
@@ -491,6 +504,56 @@ function interpolate_trig_b(points; closed = true, alpha = 1)
 
     update_endpoints!(c, λ, closed)
     (c, t)
+end
+
+function compute_parameter_trig_a(curve, p, alpha)
+    ϵ = 1e-8
+    coeffs = coeffs_trig_b(curve, p, alpha)
+    p = Polynomial(coeffs)
+    x = [log(r) * 2 / (im * π) for r in roots(p)]
+    for xi in x
+        abs(imag(xi)) < ϵ && -ϵ <= real(xi) <= 1 + ϵ && return clamp(real(xi), 0, 1)
+    end
+    @error "No suitable solution"
+end
+
+function compute_central_cps_trig_a(c, λ, t, points, closed, alpha)
+    n = length(c)
+    A = zeros(n, n)
+    fixed = zeros(n, 2)
+    for i in 1:n
+        im = mod1(i - 1, n)
+        ip = mod1(i + 1, n)
+        S = sin(π * t[i] / 2)
+        C = cos(π * t[i] / 2)
+        if closed || i > 1
+            A[i,im] = ((1 - S) ^ 2 + 2 * (1 - S) * S * (1 - alpha)) * (1 - λ[im])
+        else
+            fixed[1,:] -= c[1][1] * ((1 - S) ^ 2 + 2 * (1 - S) * S * (1 - alpha))
+        end
+        if closed || i < n
+            A[i,ip] = ((1 - C) ^ 2 + 2 * (1 - S) * S * (1 - alpha)) * λ[i]
+        else
+            fixed[n,:] -= c[n][3] * ((1 - C) ^ 2 + 2 * (1 - S) * S * (1 - alpha))
+        end
+        if closed || 1 < i < n
+            A[i,i] =
+                λ[im] * ((1 - S) ^ 2 + 2 * (1 - S) * S * (1 - alpha)) +
+                (2 * ((1 - S) + (1 - C)) * (S + C - 1) + 4 * (1 - S) * (1 - C)) * alpha +
+                (1 - λ[i]) * ((1 - C) ^ 2 + 2 * (1 - C) * C * (1 - alpha))
+        elseif n == 1
+            A[i,i] = (2 * ((1 - S) + (1 - C)) * (S + C - 1) + 4 * (1 - S) * (1 - C)) * alpha
+        elseif i == 1
+            A[i,i] =
+                (2 * ((1 - S) + (1 - C)) * (S + C - 1) + 4 * (1 - S) * (1 - C)) * alpha +
+                (1 - λ[i]) * ((1 - C) ^ 2 + 2 * (1 - C) * C * (1 - alpha))
+        else # i == n
+            A[i,i] =
+                λ[im] * ((1 - S) ^ 2 + 2 * (1 - S) * S * (1 - alpha)) +
+                (2 * ((1 - S) + (1 - C)) * (S + C - 1) + 4 * (1 - S) * (1 - C)) * alpha
+        end
+    end
+    A \ (points + fixed)
 end
 
 function compute_parameter_trig_b(curve, p, alpha)
@@ -543,8 +606,51 @@ function compute_central_cps_trig_b(c, λ, t, points, closed, alpha)
     A \ (points + fixed)
 end
 
+function create_trig_quadratic(points, ratio)
+    [points[1],
+     (1 - ratio) * points[1] + ratio * points[2],
+     ((1 - ratio) * points[1] + 2 * ratio * points[2] + ratio * points[3]) / 2,
+     ratio * points[2] + (1 - ratio) * points[3],
+     points[3]]
+end
+
 
 # Trigonometric curve evaluation
+
+function trig_a_eval(curve, u, d)
+    S = sin(π * u / 2)
+    C = cos(π * u / 2)
+    a = 1 - S
+    b = S + C - 1
+    c = 1 - C
+    blend = [a ^ 2,
+             2 * a * b,
+             4 * a * c,
+             2 * b * c,
+             c ^ 2]
+    p = sum(curve .* blend)
+    d == 0 && return p
+    der = [p]
+    db1 = [-C * a,
+           -C * b + (C - S) * a,
+           -2 * C * c + 2 * S * a,
+           S * b + (C - S) * c,
+           S * c] * π
+    push!(der, sum(curve .* db1))
+    d == 1 && return der
+    db2 = [S * a + C ^ 2,
+           S * b - 2 * C * (C - S) - (S + C) * a,
+           2 * S * (c - C) + 2 * C * (a - S),
+           C * b + 2 * S * (C - S) - (S + C) * c,
+           C * c + S ^ 2] * π ^ 2 / 2
+    push!(der, sum(curve .* db2))
+    der
+end
+
+function trig_a_curvature(curve, u)
+    der = trig_a_eval(curve, u, 2)
+    det([der[2] der[3]]) / norm(der[2]) ^ 3
+end
 
 function trig_b_eval(curve, alpha, u, d)
     S = sin(π * u / 2)
@@ -725,13 +831,15 @@ function generate_curve()
         eval_fn, curvature_fn = bezier_eval, bezier_curvature
     elseif curve_type == 2
         # Trigonometric A
-        # TODO
-        return
+        cpts, t = interpolate_trig(points, closed=closed_curve, quadratic=true, alpha=alpha)
+        cpts = [create_trig_quadratic(c, alpha) for c in cpts]
+        eval_fn = (curve, u, d=0) -> trig_a_eval(curve, u, d)
+        curvature_fn = (curve, u) -> trig_a_curvature(curve, u)
     elseif curve_type == 3
         # Trigonometric B
-        cpts, t = interpolate_trig_b(points, closed=closed_curve, alpha=alpha)
-        eval_fn(curve, u, d=0) = trig_b_eval(curve, alpha, u, d)
-        curvature_fn(curve, u) = trig_b_curvature(curve, alpha, u)
+        cpts, t = interpolate_trig(points, closed=closed_curve, quadratic=false, alpha=alpha)
+        eval_fn = (curve, u, d=0) -> trig_b_eval(curve, alpha, u, d)
+        curvature_fn = (curve, u) -> trig_b_curvature(curve, alpha, u)
     end
 
     global controls = vcat(cpts...)
