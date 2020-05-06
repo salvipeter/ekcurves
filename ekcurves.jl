@@ -446,6 +446,13 @@ end
 
 # Interpolation with trigonometric curves
 
+"""
+    interpolate(points; closed, quadratic, alpha)
+
+Interpolates a trigonometric ϵ-κ-curve on the given points.
+The result is given as `(c, t)`, where `c` contains the curves (as a vector of control points),
+and `t` are the parameters of the interpolated points.
+"""
 function interpolate_trig(points; closed = true, quadratic = false, alpha = 1)
     n = length(points) - (closed ? 0 : 2)
 
@@ -507,8 +514,21 @@ function interpolate_trig(points; closed = true, quadratic = false, alpha = 1)
     (c, t)
 end
 
+"""
+    compute_parameter_trig_a(curve, p, alpha)
+
+Computes the parameter where a "quadratic" trigonometric curve with the same endpoints
+takes its largest curvature value, and also interpolates the given `p` point.
+"""
 compute_parameter_trig_a(curve, p, alpha) = solve_trig(coeffs_trig_a(curve, p, alpha))
 
+"""
+    solve_trig(coeffs)
+
+Finds a root of a polynomial based on `x=exp(π*im*t/2)`,
+such that t is real and is in `[0, 1]`.
+The coefficients are given in the order `[1, x, x^2, ...]`.
+"""
 function solve_trig(coeffs)
     ϵ = 1e-8
     p = Polynomial(coeffs)
@@ -527,9 +547,18 @@ function solve_trig(coeffs)
         for xi in x
             abs(imag(xi)) < ϵ && -ϵ <= real(xi) <= 1 + ϵ && return clamp(real(xi), 0, 1)
         end
+        0.5
     end
 end
 
+"""
+    compute_central_cps_trig_a(cp, λ, t, points, closed, alpha)
+
+Computes the central control points of the "quadratic" trigonometric curves `cp`
+in such a way that `c(t[i]) = points[i]`, where `points` is a matrix of size `(n, 2)`.
+The control points satisfy `c[i][3] = (1-λ[i]) c[i][2] + λ[i] c[i+1][2]`.
+The result is also a matrix of size `(n, 2)`.
+"""
 function compute_central_cps_trig_a(cp, λ, t, points, closed, alpha)
     n = length(cp)
     A = zeros(n, n)
@@ -572,8 +601,22 @@ function compute_central_cps_trig_a(cp, λ, t, points, closed, alpha)
     A \ (points + fixed)
 end
 
+"""
+    compute_parameter_trig_b(curve, p, alpha)
+
+Computes the parameter where a trigonometric curve with the same endpoints
+takes its largest curvature value, and also interpolates the given `p` point.
+"""
 compute_parameter_trig_b(curve, p, alpha) = solve_trig(coeffs_trig_b(curve, p, alpha))
 
+"""
+    compute_central_cps_trig_b(c, λ, t, points, closed, alpha)
+
+Computes the central control points of the "quadratic" trigonometric curves `c`
+in such a way that `c(t[i]) = points[i]`, where `points` is a matrix of size `(n, 2)`.
+The control points satisfy `c[i][3] = (1-λ[i]) c[i][2] + λ[i] c[i+1][2]`.
+The result is also a matrix of size `(n, 2)`.
+"""
 function compute_central_cps_trig_b(c, λ, t, points, closed, alpha)
     n = length(c)
     A = zeros(n, n)
@@ -613,6 +656,13 @@ function compute_central_cps_trig_b(c, λ, t, points, closed, alpha)
     A \ (points + fixed)
 end
 
+"""
+    create_trig_quadratic(points, ratio)
+
+Creates the control points of a "quadratic" trigonometric curve based on 3 `points`
+and the given `ratio`. When `ratio == 1/2`, this will be the same curve
+as the "linear" trigonometric curve defined by the same points.
+"""
 function create_trig_quadratic(points, ratio)
     [points[1],
      (1 - ratio) * points[1] + ratio * points[2],
@@ -624,6 +674,12 @@ end
 
 # Trigonometric curve evaluation
 
+"""
+    trig_a_eval(curve, u, d)
+
+Evaluates a "quadratic" trigonometric curve, given by its control points,
+at the parameter `u`, with `d` derivatives.
+"""
 function trig_a_eval(curve, u, d)
     S = sin(π * u / 2)
     C = cos(π * u / 2)
@@ -654,11 +710,23 @@ function trig_a_eval(curve, u, d)
     der
 end
 
+"""
+    trig_a_curvature(curve, u)
+
+Computes the curvature at the given parameter.
+"""
 function trig_a_curvature(curve, u)
     der = trig_a_eval(curve, u, 2)
     det([der[2] der[3]]) / norm(der[2]) ^ 3
 end
 
+"""
+    trig_b_eval(curve, alpha, u, d)
+
+Evaluates a trigonometric curve, given by its control points,
+at the parameter `u`, with `d` derivatives.
+`alpha` is a parameter of the basis functions.
+"""
 function trig_b_eval(curve, alpha, u, d)
     S = sin(π * u / 2)
     C = cos(π * u / 2)
@@ -680,6 +748,11 @@ function trig_b_eval(curve, alpha, u, d)
     der
 end
 
+"""
+    trig_b_curvature(curve, u)
+
+Computes the curvature at the given parameter.
+"""
 function trig_b_curvature(curve, alpha, u)
     der = trig_b_eval(curve, alpha, u, 2)
     det([der[2] der[3]]) / norm(der[2]) ^ 3
