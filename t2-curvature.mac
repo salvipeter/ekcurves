@@ -6,7 +6,7 @@
    (px,py)             - the point to interpolate at the maximal curvature
    r                   - alpha, the ratio for the conversion between "linear" & "quadratic"
  Output:
-   ...?
+   <18th-degree polynomial in %e^(%i*%pi*t/2)>
  */
 
 exponentialize: true$ /* Automatically convert trigonemetric functions to exponential form */

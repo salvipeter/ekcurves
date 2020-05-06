@@ -10,9 +10,10 @@ include("trig-coeffs.jl")
 
 
 # Parameters
-maxiter = 1000
+maxiter = 400
 distance_tolerance = 1e-4
-warn_for_convergence_failure = false
+warn_on_convergence_failure = false
+warn_on_multiple_solutions = false
 
 # GUI parameters
 width = 500
@@ -87,7 +88,7 @@ function interpolate(points; closed = true, cubic = false, alpha = 2/3)
                 cp = cubic ? create_cubic(c[i], alpha) : c[i]
                 norm(bezier_eval(cp, t[i]) - points[i])
             end
-            warn_for_convergence_failure && @warn "Did not converge - err: $max_error"
+            warn_on_convergence_failure && @warn "Did not converge - err: $max_error"
             break
         end
 
@@ -479,12 +480,12 @@ function interpolate_trig(points; closed = true, quadratic = false, alpha = 1)
             max_error = maximum(1:n) do i
                 if quadratic
                     cp = create_trig_quadratic(c[i], alpha)
-                    norm(trig_a_eval(cp, t[i]) - points[i])
+                    norm(trig_a_eval(cp, t[i], 0) - points[i])
                 else
-                    norm(trig_b_eval(c[i], t[i]) - points[i])
+                    norm(trig_b_eval(c[i], alpha, t[i], 0) - points[i])
                 end
             end
-            warn_for_convergence_failure && @warn "Did not converge - err: $max_error"
+            warn_on_convergence_failure && @warn "Did not converge - err: $max_error"
             break
         end
 
@@ -506,19 +507,31 @@ function interpolate_trig(points; closed = true, quadratic = false, alpha = 1)
     (c, t)
 end
 
-function compute_parameter_trig_a(curve, p, alpha)
+compute_parameter_trig_a(curve, p, alpha) = solve_trig(coeffs_trig_a(curve, p, alpha))
+
+function solve_trig(coeffs)
     ϵ = 1e-8
-    coeffs = coeffs_trig_b(curve, p, alpha)
     p = Polynomial(coeffs)
     x = [log(r) * 2 / (im * π) for r in roots(p)]
-    for xi in x
-        abs(imag(xi)) < ϵ && -ϵ <= real(xi) <= 1 + ϵ && return clamp(real(xi), 0, 1)
+    if warn_on_multiple_solutions
+        sol = []
+        for xi in x
+            if abs(imag(xi)) < ϵ && -ϵ <= real(xi) <= 1 + ϵ
+                push!(sol, xi)
+            end
+        end
+        isempty(sol) && (@warn "No suitable solution"; return 0.5)
+        length(sol) > 1 && @warn "Multiple solutions: $sol"
+        clamp(real(sol[1]), 0, 1)
+    else
+        for xi in x
+            abs(imag(xi)) < ϵ && -ϵ <= real(xi) <= 1 + ϵ && return clamp(real(xi), 0, 1)
+        end
     end
-    @error "No suitable solution"
 end
 
-function compute_central_cps_trig_a(c, λ, t, points, closed, alpha)
-    n = length(c)
+function compute_central_cps_trig_a(cp, λ, t, points, closed, alpha)
+    n = length(cp)
     A = zeros(n, n)
     fixed = zeros(n, 2)
     for i in 1:n
@@ -526,46 +539,40 @@ function compute_central_cps_trig_a(c, λ, t, points, closed, alpha)
         ip = mod1(i + 1, n)
         S = sin(π * t[i] / 2)
         C = cos(π * t[i] / 2)
+        a = 1 - S
+        b = S + C - 1
+        c = 1 - C
         if closed || i > 1
-            A[i,im] = ((1 - S) ^ 2 + 2 * (1 - S) * S * (1 - alpha)) * (1 - λ[im])
+            A[i,im] = (a ^ 2 + 2 * a * (b + c) * (1 - alpha)) * (1 - λ[im])
         else
-            fixed[1,:] -= c[1][1] * ((1 - S) ^ 2 + 2 * (1 - S) * S * (1 - alpha))
+            fixed[1,:] -= cp[1][1] * (a ^ 2 + 2 * a * (b + c) * (1 - alpha))
         end
         if closed || i < n
-            A[i,ip] = ((1 - C) ^ 2 + 2 * (1 - S) * S * (1 - alpha)) * λ[i]
+            A[i,ip] = (c ^ 2 + 2 * c * (a + b) * (1 - alpha)) * λ[i]
         else
-            fixed[n,:] -= c[n][3] * ((1 - C) ^ 2 + 2 * (1 - S) * S * (1 - alpha))
+            fixed[n,:] -= cp[n][3] * (c ^ 2 + 2 * c * (a + b) * (1 - alpha))
         end
         if closed || 1 < i < n
             A[i,i] =
-                λ[im] * ((1 - S) ^ 2 + 2 * (1 - S) * S * (1 - alpha)) +
-                (2 * ((1 - S) + (1 - C)) * (S + C - 1) + 4 * (1 - S) * (1 - C)) * alpha +
-                (1 - λ[i]) * ((1 - C) ^ 2 + 2 * (1 - C) * C * (1 - alpha))
+                λ[im] * (a ^ 2 + 2 * a * (b + c) * (1 - alpha)) +
+                2 * (a * b + 2 * a * c + b * c) * alpha +
+                (1 - λ[i]) * (c ^ 2 + 2 * c * (a + b) * (1 - alpha))
         elseif n == 1
-            A[i,i] = (2 * ((1 - S) + (1 - C)) * (S + C - 1) + 4 * (1 - S) * (1 - C)) * alpha
+            A[i,i] = 2 * (a * b + 2 * a * c + b * c) * alpha
         elseif i == 1
             A[i,i] =
-                (2 * ((1 - S) + (1 - C)) * (S + C - 1) + 4 * (1 - S) * (1 - C)) * alpha +
-                (1 - λ[i]) * ((1 - C) ^ 2 + 2 * (1 - C) * C * (1 - alpha))
+                2 * (a * b + 2 * a * c + b * c) * alpha +
+                (1 - λ[i]) * (c ^ 2 + 2 * c * (a + b) * (1 - alpha))
         else # i == n
             A[i,i] =
-                λ[im] * ((1 - S) ^ 2 + 2 * (1 - S) * S * (1 - alpha)) +
-                (2 * ((1 - S) + (1 - C)) * (S + C - 1) + 4 * (1 - S) * (1 - C)) * alpha
+                λ[im] * (a ^ 2 + 2 * a * (b + c) * (1 - alpha)) +
+                2 * (a * b + 2 * a * c + b * c) * alpha
         end
     end
     A \ (points + fixed)
 end
 
-function compute_parameter_trig_b(curve, p, alpha)
-    ϵ = 1e-8
-    coeffs = coeffs_trig_b(curve, p, alpha)
-    p = Polynomial(coeffs)
-    x = [log(r) * 2 / (im * π) for r in roots(p)]
-    for xi in x
-        abs(imag(xi)) < ϵ && -ϵ <= real(xi) <= 1 + ϵ && return clamp(real(xi), 0, 1)
-    end
-    @error "No suitable solution"
-end
+compute_parameter_trig_b(curve, p, alpha) = solve_trig(coeffs_trig_b(curve, p, alpha))
 
 function compute_central_cps_trig_b(c, λ, t, points, closed, alpha)
     n = length(c)
@@ -609,7 +616,7 @@ end
 function create_trig_quadratic(points, ratio)
     [points[1],
      (1 - ratio) * points[1] + ratio * points[2],
-     ((1 - ratio) * points[1] + 2 * ratio * points[2] + ratio * points[3]) / 2,
+     ((1 - ratio) * points[1] + 2 * ratio * points[2] + (1 - ratio) * points[3]) / 2,
      ratio * points[2] + (1 - ratio) * points[3],
      points[3]]
 end
@@ -961,7 +968,7 @@ function setup_gui()
     alpha_choices =
         [["N/A", "N/A", "N/A", "N/A", "N/A", "N/A", "N/A"],
          ["2/3", "0.7", "0.75", "0.8", "0.85", "0.9", "0.95"],
-         ["0.5", "0.6", "0.7", "0.75", "0.8", "0.9", "1"],
+         ["0.5", "0.6", "0.65", "0.7", "0.75", "0.8", "0.85"],
          ["1", "1.2", "1.3", "1.4", "1.5", "1.6", "1.7"]]
     signal_connect(changetype, "changed") do _
         i = changetype.active[Int]
