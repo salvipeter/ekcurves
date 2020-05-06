@@ -41,7 +41,7 @@ curvature = []
 max_curvatures = []
 
 # Designs
-designs = ["bear", "deer", "elephant", "bird", "plane", "pumpkin", "rose"]
+designs = ["bear", "deer", "elephant", "bird", "plane", "pumpkin", "rose", "dinosaur"]
 
 
 # Interpolation
