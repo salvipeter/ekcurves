@@ -1043,8 +1043,8 @@ function setup_gui()
          ["2/3", "0.7", "0.75", "0.8", "0.85", "0.9", "0.95"],
          ["0.55", "0.6", "0.65", "0.7", "0.75", "0.8", "0.85"],
          ["1.1", "1.2", "1.3", "1.4", "1.5", "1.6", "1.7"]]
-    signal_connect(changetype, "changed") do _
-        i = changetype.active[Int]
+    function type_handler(ct)
+        i = ct.active[Int]
         global curve_type = i
         ac = alpha_choices[i+1]
         for j in 1:length(ac)
@@ -1056,6 +1056,8 @@ function setup_gui()
         generate_curve()
         draw(canvas)
     end
+    signal_connect(type_handler, changetype, "changed")
+    type_handler(changetype)
 
     hbox = GtkBox(:h)
     hbox.spacing[Int] = 10
