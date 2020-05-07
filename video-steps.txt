@@ -1,0 +1,22 @@
+1. k-curve vs. trigonometric basis (alpha = 0.5)
+  - closed curve with 3-4 points, curvature
+    => trigonometric will be close to a circle, k-curve is very uneven
+
+2. Changing alpha values globally
+  - change from quadratic to cubic while showing control polygons
+  - cubic, open curve with a few points & inflections, curvature
+  - cubic, closed curve with a few point & inflections, curvature
+
+3. Bezier vs. trigonometric basis (various alpha values)
+  - trigonometric, closed curve with a few points & inflections, curvature
+  - changing between cubic & trigonometric
+    => only small changes when alpha is large
+
+4. Local change of alpha
+  - open curve with 5-6 points, curvature
+  - select different points, then multiple points
+  - [bird] without curvature, wing manipulation
+
+5. Global change of models (various alpha values)
+  - [bear, deer] without curvature, with points
+  - [rose, elephant] without curvature, without points
