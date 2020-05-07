@@ -447,13 +447,13 @@ end
 # Interpolation with trigonometric curves
 
 """
-    interpolate(points; closed, quadratic, alpha)
+    interpolate(points; closed, alpha)
 
 Interpolates a trigonometric ϵ-κ-curve on the given points.
 The result is given as `(c, t)`, where `c` contains the curves (as a vector of control points),
 and `t` are the parameters of the interpolated points.
 """
-function interpolate_trig(points; closed = true, quadratic = false, alpha = 1)
+function interpolate_trig(points; closed = true, alpha = 1)
     n = length(points) - (closed ? 0 : 2)
 
     c = map(p -> [nothing, p, nothing], closed ? points : points[2:end-1])
@@ -477,30 +477,17 @@ function interpolate_trig(points; closed = true, quadratic = false, alpha = 1)
     for iteration in 1:maxiter
         λ = compute_lambdas(c, closed)
         update_endpoints!(c, λ, closed)
-        if quadratic
-            t = [compute_parameter_trig_a(c[i], points[i], alpha) for i in 1:n]
-        else
-            t = [compute_parameter_trig_b(c[i], points[i], alpha) for i in 1:n]
-        end
+        t = [compute_parameter_trig(c[i], points[i], alpha) for i in 1:n]
 
         if iteration == maxiter
             max_error = maximum(1:n) do i
-                if quadratic
-                    cp = create_trig_quadratic(c[i], alpha)
-                    norm(trig_a_eval(cp, t[i], 0) - points[i])
-                else
-                    norm(trig_b_eval(c[i], alpha, t[i], 0) - points[i])
-                end
+                norm(trig_eval(c[i], alpha, t[i], 0) - points[i])
             end
             warn_on_convergence_failure && @warn "Did not converge - err: $max_error"
             break
         end
 
-        if quadratic
-            x = compute_central_cps_trig_a(c, λ, t, rhs, closed, alpha)
-        else
-            x = compute_central_cps_trig_b(c, λ, t, rhs, closed, alpha)
-        end
+        x = compute_central_cps_trig(c, λ, t, rhs, closed, alpha)
         max_deviation = 0
         for i in 1:n
             max_deviation = max(max_deviation, norm(x[i,:] - c[i][2]))
@@ -515,12 +502,12 @@ function interpolate_trig(points; closed = true, quadratic = false, alpha = 1)
 end
 
 """
-    compute_parameter_trig_a(curve, p, alpha)
+    compute_parameter_trig(curve, p, alpha)
 
-Computes the parameter where a "quadratic" trigonometric curve with the same endpoints
+Computes the parameter where a trigonometric curve with the same endpoints
 takes its largest curvature value, and also interpolates the given `p` point.
 """
-compute_parameter_trig_a(curve, p, alpha) = solve_trig(coeffs_trig_a(curve, p, alpha))
+compute_parameter_trig(curve, p, alpha) = solve_trig(coeffs_trig(curve, p, alpha))
 
 """
     solve_trig(coeffs)
@@ -552,72 +539,14 @@ function solve_trig(coeffs)
 end
 
 """
-    compute_central_cps_trig_a(cp, λ, t, points, closed, alpha)
-
-Computes the central control points of the "quadratic" trigonometric curves `cp`
-in such a way that `c(t[i]) = points[i]`, where `points` is a matrix of size `(n, 2)`.
-The control points satisfy `c[i][3] = (1-λ[i]) c[i][2] + λ[i] c[i+1][2]`.
-The result is also a matrix of size `(n, 2)`.
-"""
-function compute_central_cps_trig_a(cp, λ, t, points, closed, alpha)
-    n = length(cp)
-    A = zeros(n, n)
-    fixed = zeros(n, 2)
-    for i in 1:n
-        im = mod1(i - 1, n)
-        ip = mod1(i + 1, n)
-        S = sin(π * t[i] / 2)
-        C = cos(π * t[i] / 2)
-        a = 1 - S
-        b = S + C - 1
-        c = 1 - C
-        if closed || i > 1
-            A[i,im] = (a ^ 2 + 2 * a * (b + c) * (1 - alpha)) * (1 - λ[im])
-        else
-            fixed[1,:] -= cp[1][1] * (a ^ 2 + 2 * a * (b + c) * (1 - alpha))
-        end
-        if closed || i < n
-            A[i,ip] = (c ^ 2 + 2 * c * (a + b) * (1 - alpha)) * λ[i]
-        else
-            fixed[n,:] -= cp[n][3] * (c ^ 2 + 2 * c * (a + b) * (1 - alpha))
-        end
-        if closed || 1 < i < n
-            A[i,i] =
-                λ[im] * (a ^ 2 + 2 * a * (b + c) * (1 - alpha)) +
-                2 * (a * b + 2 * a * c + b * c) * alpha +
-                (1 - λ[i]) * (c ^ 2 + 2 * c * (a + b) * (1 - alpha))
-        elseif n == 1
-            A[i,i] = 2 * (a * b + 2 * a * c + b * c) * alpha
-        elseif i == 1
-            A[i,i] =
-                2 * (a * b + 2 * a * c + b * c) * alpha +
-                (1 - λ[i]) * (c ^ 2 + 2 * c * (a + b) * (1 - alpha))
-        else # i == n
-            A[i,i] =
-                λ[im] * (a ^ 2 + 2 * a * (b + c) * (1 - alpha)) +
-                2 * (a * b + 2 * a * c + b * c) * alpha
-        end
-    end
-    A \ (points + fixed)
-end
-
-"""
-    compute_parameter_trig_b(curve, p, alpha)
-
-Computes the parameter where a trigonometric curve with the same endpoints
-takes its largest curvature value, and also interpolates the given `p` point.
-"""
-compute_parameter_trig_b(curve, p, alpha) = solve_trig(coeffs_trig_b(curve, p, alpha))
-
-"""
-    compute_central_cps_trig_b(c, λ, t, points, closed, alpha)
+    compute_central_cps_trig(c, λ, t, points, closed, alpha)
 
 Computes the central control points of the "quadratic" trigonometric curves `c`
 in such a way that `c(t[i]) = points[i]`, where `points` is a matrix of size `(n, 2)`.
 The control points satisfy `c[i][3] = (1-λ[i]) c[i][2] + λ[i] c[i+1][2]`.
 The result is also a matrix of size `(n, 2)`.
 """
-function compute_central_cps_trig_b(c, λ, t, points, closed, alpha)
+function compute_central_cps_trig(c, λ, t, points, closed, alpha)
     n = length(c)
     A = zeros(n, n)
     fixed = zeros(n, 2)
@@ -656,78 +585,17 @@ function compute_central_cps_trig_b(c, λ, t, points, closed, alpha)
     A \ (points + fixed)
 end
 
-"""
-    create_trig_quadratic(points, ratio)
-
-Creates the control points of a "quadratic" trigonometric curve based on 3 `points`
-and the given `ratio`. When `ratio == 1/2`, this will be the same curve
-as the "linear" trigonometric curve defined by the same points.
-"""
-function create_trig_quadratic(points, ratio)
-    [points[1],
-     (1 - ratio) * points[1] + ratio * points[2],
-     ((1 - ratio) * points[1] + 2 * ratio * points[2] + (1 - ratio) * points[3]) / 2,
-     ratio * points[2] + (1 - ratio) * points[3],
-     points[3]]
-end
-
 
 # Trigonometric curve evaluation
 
 """
-    trig_a_eval(curve, u, d)
-
-Evaluates a "quadratic" trigonometric curve, given by its control points,
-at the parameter `u`, with `d` derivatives.
-"""
-function trig_a_eval(curve, u, d)
-    S = sin(π * u / 2)
-    C = cos(π * u / 2)
-    a = 1 - S
-    b = S + C - 1
-    c = 1 - C
-    blend = [a ^ 2,
-             2 * a * b,
-             4 * a * c,
-             2 * b * c,
-             c ^ 2]
-    p = sum(curve .* blend)
-    d == 0 && return p
-    der = [p]
-    db1 = [-C * a,
-           -C * b + (C - S) * a,
-           -2 * C * c + 2 * S * a,
-           S * b + (C - S) * c,
-           S * c] * π
-    push!(der, sum(curve .* db1))
-    d == 1 && return der
-    db2 = [S * a + C ^ 2,
-           S * b - 2 * C * (C - S) - (S + C) * a,
-           2 * S * (c - C) + 2 * C * (a - S),
-           C * b + 2 * S * (C - S) - (S + C) * c,
-           C * c + S ^ 2] * π ^ 2 / 2
-    push!(der, sum(curve .* db2))
-    der
-end
-
-"""
-    trig_a_curvature(curve, u)
-
-Computes the curvature at the given parameter.
-"""
-function trig_a_curvature(curve, u)
-    der = trig_a_eval(curve, u, 2)
-    det([der[2] der[3]]) / norm(der[2]) ^ 3
-end
-
-"""
-    trig_b_eval(curve, alpha, u, d)
+    trig_eval(curve, alpha, u, d)
 
 Evaluates a trigonometric curve, given by its control points,
 at the parameter `u`, with `d` derivatives.
 `alpha` is a parameter of the basis functions.
 """
-function trig_b_eval(curve, alpha, u, d)
+function trig_eval(curve, alpha, u, d)
     S = sin(π * u / 2)
     C = cos(π * u / 2)
     b = [1 - (1 - alpha) * S ^ 2 - alpha * S,
@@ -749,12 +617,12 @@ function trig_b_eval(curve, alpha, u, d)
 end
 
 """
-    trig_b_curvature(curve, u)
+    trig_curvature(curve, u)
 
 Computes the curvature at the given parameter.
 """
-function trig_b_curvature(curve, alpha, u)
-    der = trig_b_eval(curve, alpha, u, 2)
+function trig_curvature(curve, alpha, u)
+    der = trig_eval(curve, alpha, u, 2)
     det([der[2] der[3]]) / norm(der[2]) ^ 3
 end
 
@@ -910,16 +778,10 @@ function generate_curve()
         cpts = [create_cubic(c, alpha) for c in cpts]
         eval_fn, curvature_fn = bezier_eval, bezier_curvature
     elseif curve_type == 2
-        # Trigonometric A
-        cpts, t = interpolate_trig(points, closed=closed_curve, quadratic=true, alpha=alpha)
-        cpts = [create_trig_quadratic(c, alpha) for c in cpts]
-        eval_fn = (curve, u, d=0) -> trig_a_eval(curve, u, d)
-        curvature_fn = (curve, u) -> trig_a_curvature(curve, u)
-    elseif curve_type == 3
         # Trigonometric B
-        cpts, t = interpolate_trig(points, closed=closed_curve, quadratic=false, alpha=alpha)
-        eval_fn = (curve, u, d=0) -> trig_b_eval(curve, alpha, u, d)
-        curvature_fn = (curve, u) -> trig_b_curvature(curve, alpha, u)
+        cpts, t = interpolate_trig(points, closed=closed_curve, alpha=alpha * 2)
+        eval_fn = (curve, u, d=0) -> trig_eval(curve, alpha * 2, u, d)
+        curvature_fn = (curve, u) -> trig_curvature(curve, alpha * 2, u)
     end
 
     global controls = vcat(cpts...)
@@ -1011,7 +873,7 @@ function setup_gui()
 
     # Cubic checkbox
     changetype = GtkComboBoxText()
-    curve_types = ["Original", "Cubic", "Trig. A", "Trig. B"]
+    curve_types = ["Original", "Cubic", "Trig.basis"]
     foreach(t -> push!(changetype, t), curve_types)
     changetype.active[Int] = curve_type
     push!(hbox, changetype)
@@ -1041,8 +903,7 @@ function setup_gui()
     alpha_choices =
         [["N/A", "N/A", "N/A", "N/A", "N/A", "N/A", "N/A"],
          ["2/3", "0.7", "0.75", "0.8", "0.85", "0.9", "0.95"],
-         ["0.55", "0.6", "0.65", "0.7", "0.75", "0.8", "0.85"],
-         ["1.1", "1.2", "1.3", "1.4", "1.5", "1.6", "1.7"]]
+         ["0.55", "0.6", "0.65", "0.7", "0.75", "0.8", "0.85"]]
     function type_handler(ct)
         i = ct.active[Int]
         global curve_type = i
