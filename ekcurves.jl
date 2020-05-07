@@ -34,6 +34,10 @@ alpha = 2/3
 incremental = false
 current_file = nothing
 
+# Dirty hack
+global radios
+alpha_index = 1
+
 # Global variables
 # `controls`, `curve` and `curvature` are vectors of curve-data
 # The first `nr_closed` curve is assumed to be closed, the rest is open
@@ -44,6 +48,8 @@ global curve
 global curvature
 global max_curvatures
 global nr_closed
+global selected
+global selected_alpha
 
 # Designs
 designs = ["bear", "deer", "elephant", "bird", "plane", "pumpkin", "rose", "dinosaur"]
@@ -83,14 +89,18 @@ function interpolate(points; closed = true, cubic = false, alpha = 2/3)
         λ = compute_lambdas(c, closed)
         update_endpoints!(c, λ, closed)
         if cubic
-            t = [compute_parameter(c[i], points[i], alpha) for i in 1:n]
+            for i in 1:n
+                a = (i + (closed ? 0 : 1)) in selected ? selected_alpha : alpha
+                t[i] = compute_parameter(c[i], points[i], a)
+            end
         else
             t = [compute_parameter(c[i], points[i]) for i in 1:n]
         end
 
         if iteration == maxiter
             max_error = maximum(1:n) do i
-                cp = cubic ? create_cubic(c[i], alpha) : c[i]
+                a = (i + (closed ? 0 : 1)) in selected ? selected_alpha : alpha
+                cp = cubic ? create_cubic(c[i], a) : c[i]
                 norm(bezier_eval(cp, t[i]) - points[i])
             end
             warn_on_convergence_failure && @warn "Did not converge - err: $max_error"
@@ -143,8 +153,10 @@ function compute_lambdas(c, closed)
     map(1:n) do i
         !closed && i == n && return 0 # not used
         ip = mod1(i + 1, n)
-        tmp = sqrt(abs(Δ(c[i][1], c[i][2], c[ip][2])))
-        denom = (tmp + sqrt(abs(Δ(c[i][2], c[ip][2], c[ip][3]))))
+        a = (i + (closed ? 0 : 1)) in selected ? selected_alpha : alpha
+        ap = (ip + (closed ? 0 : 1)) in selected ? selected_alpha : alpha
+        tmp = sqrt((1 - a) * abs(Δ(c[i][1], c[i][2], c[ip][2])))
+        denom = (tmp + a / ap * sqrt((1 - ap) * abs(Δ(c[i][2], c[ip][2], c[ip][3]))))
         if denom < 1e-10
             denom += 1e-10
         end
@@ -426,33 +438,34 @@ function compute_central_cps(c, λ, t, points, closed, alpha)
     A = zeros(n, n)
     fixed = zeros(n, 2)
     for i in 1:n
+        a = (i + (closed ? 0 : 1)) in selected ? selected_alpha : alpha
         im = mod1(i - 1, n)
         ip = mod1(i + 1, n)
         if closed || i > 1
-            A[i,im] = (1 - λ[im]) * ((1 - t[i]) ^ 3 + 3 * (1 - t[i]) ^ 2 * t[i] * (1 - alpha))
+            A[i,im] = (1 - λ[im]) * ((1 - t[i]) ^ 3 + 3 * (1 - t[i]) ^ 2 * t[i] * (1 - a))
         else
-            fixed[1,:] -= c[1][1] * ((1 - t[i]) ^ 3 + 3 * (1 - t[i]) ^ 2 * t[i] * (1 - alpha))
+            fixed[1,:] -= c[1][1] * ((1 - t[i]) ^ 3 + 3 * (1 - t[i]) ^ 2 * t[i] * (1 - a))
         end
         if closed || i < n
-            A[i,ip] = λ[i] * (t[i] ^ 3 + 3 * (1 - t[i]) * t[i] ^ 2 * (1 - alpha))
+            A[i,ip] = λ[i] * (t[i] ^ 3 + 3 * (1 - t[i]) * t[i] ^ 2 * (1 - a))
         else
-            fixed[n,:] -= c[n][3] * (t[i] ^ 3 + 3 * (1 - t[i]) * t[i] ^ 2 * (1 - alpha))
+            fixed[n,:] -= c[n][3] * (t[i] ^ 3 + 3 * (1 - t[i]) * t[i] ^ 2 * (1 - a))
         end
         if closed || 1 < i < n
             A[i,i] =
-                λ[im] * ((1 - t[i]) ^ 3 + 3 * (1 - t[i]) ^ 2 * t[i] * (1 - alpha)) +
-                (1 - λ[i]) * (t[i] ^ 3 + 3 * (1 - t[i]) * t[i] ^ 2 * (1 - alpha)) +
-                alpha * 3 * (1 - t[i]) * t[i]
+                λ[im] * ((1 - t[i]) ^ 3 + 3 * (1 - t[i]) ^ 2 * t[i] * (1 - a)) +
+                (1 - λ[i]) * (t[i] ^ 3 + 3 * (1 - t[i]) * t[i] ^ 2 * (1 - a)) +
+                a * 3 * (1 - t[i]) * t[i]
         elseif n == 1
-            A[i,i] = alpha * 3 * (1 - t[i]) * t[i]
+            A[i,i] = a * 3 * (1 - t[i]) * t[i]
         elseif i == 1
             A[i,i] =
-                (1 - λ[i]) * (t[i] ^ 3 + 3 * (1 - t[i]) * t[i] ^ 2 * (1 - alpha)) +
-                alpha * 3 * (1 - t[i]) * t[i]
+                (1 - λ[i]) * (t[i] ^ 3 + 3 * (1 - t[i]) * t[i] ^ 2 * (1 - a)) +
+                a * 3 * (1 - t[i]) * t[i]
         else # i == n
             A[i,i] =
-                λ[im] * ((1 - t[i]) ^ 3 + 3 * (1 - t[i]) ^ 2 * t[i] * (1 - alpha)) +
-                alpha * 3 * (1 - t[i]) * t[i]
+                λ[im] * ((1 - t[i]) ^ 3 + 3 * (1 - t[i]) ^ 2 * t[i] * (1 - a)) +
+                a * 3 * (1 - t[i]) * t[i]
         end
     end
     A \ (points + fixed)
@@ -739,14 +752,20 @@ draw_callback = @guarded (canvas) -> begin
     end
 
     # Input points
-    for p in points[1:end]
+    for i in 1:length(points)
+        p = points[i]
         if show_curvature
             Graphics.set_source_rgb(ctx, 0, 1, 0)
             Graphics.arc(ctx, p[1], p[2], point_size, 0, 2pi)
             Graphics.fill(ctx)
         end
-        Graphics.set_source_rgb(ctx, 0, 0, 0)
-        Graphics.set_line_width(ctx, 1.0)
+        if i in selected
+            Graphics.set_source_rgb(ctx, 0, 0, 1)
+            Graphics.set_line_width(ctx, 2.0)
+        else
+            Graphics.set_source_rgb(ctx, 0, 0, 0)
+            Graphics.set_line_width(ctx, 1.0)
+        end
         rect = [p + [-point_size, -point_size] * rectangle_scale,
                 p + [-point_size,  point_size] * rectangle_scale,
                 p + [ point_size,  point_size] * rectangle_scale,
@@ -766,6 +785,8 @@ function clear_variables!()
     global max_curvatures = []
     global current_file = nothing
     global nr_closed = 0
+    global selected = []
+    global selected_alpha = alpha
 end
 
 function generate_curve()
@@ -794,7 +815,10 @@ function generate_curve()
     elseif curve_type == 1
         # Cubic
         cpts, t = interpolate(points, closed=closed_curve, cubic=true, alpha=alpha)
-        cpts = [create_cubic(c, alpha) for c in cpts]
+        for i in 1:length(cpts)
+            a = (i + (closed_curve ? 0 : 1)) in selected ? selected_alpha : alpha
+            cpts[i] = create_cubic(cpts[i], a)
+        end
         eval_fn, curvature_fn = bezier_eval, bezier_curvature
     elseif curve_type == 2
         # Trigonometric
@@ -858,6 +882,20 @@ mousedown_handler = @guarded (canvas, event) -> begin
         clicked = length(points)
         generate_curve()
         draw(canvas)
+    else
+        global selected
+        if event.state & 1 == 1     # shift
+            push!(selected, clicked)
+            generate_curve()
+            draw(canvas)
+        elseif event.state & 4 == 4 # control
+            selected = [clicked]
+            generate_curve()
+            draw(canvas)
+        elseif !isempty(selected)
+            global selected = []
+            global radios[alpha_index].active[Bool] = true
+        end
     end
 end
 
@@ -942,11 +980,24 @@ function setup_gui()
 
     # Alpha choices
     push!(hbox, GtkLabel("Alpha: "))
-    radios = [GtkRadioButton("N/A") for _ in 1:7]
+    global radios = [GtkRadioButton("N/A") for _ in 1:7]
     function alpha_handler(r)
         !r.active[Bool] && return
-        if curve_type != 0      # do not update for N/A
-            global alpha = float(eval(Meta.parse(r.label[String])))
+        if r.label[String] != "N/A"
+            if isempty(selected)
+                global alpha = float(eval(Meta.parse(r.label[String])))
+                global selected_alpha = alpha
+                for i in 1:length(radios)
+                    rb = radios[i]
+                    rb.label[String] == "N/A" && continue
+                    if float(eval(Meta.parse(rb.label[String]))) == alpha
+                        global alpha_index = i
+                        break
+                    end
+                end
+            else
+                global selected_alpha = float(eval(Meta.parse(r.label[String])))
+            end
         end
         refresh(true)
     end
