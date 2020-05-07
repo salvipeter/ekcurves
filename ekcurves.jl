@@ -32,14 +32,18 @@ closed_curve = true
 curve_type = 0
 alpha = 2/3
 incremental = false
+current_file = nothing
 
 # Global variables
-points = []
-controls = []
-curve = []
-curvature = []
-max_curvatures = []
-current_file = nothing
+# `controls`, `curve` and `curvature` are vectors of curve-data
+# The first `nr_closed` curve is assumed to be closed, the rest is open
+# `points` and `max_curvature` contain the points of all curves without distinction
+global points
+global controls
+global curve
+global curvature
+global max_curvatures
+global nr_closed
 
 # Designs
 designs = ["bear", "deer", "elephant", "bird", "plane", "pumpkin", "rose", "dinosaur"]
@@ -687,29 +691,24 @@ end
 draw_callback = @guarded (canvas) -> begin
     ctx = Graphics.getgc(canvas)
 
-    if !incremental
-        # White background
-        Graphics.rectangle(ctx, 0, 0, Graphics.width(canvas), Graphics.height(canvas))
-        Graphics.set_source_rgb(ctx, 1, 1, 1)
-        Graphics.fill(ctx)
-    end
-
-    # Input polygon
-    # Graphics.set_source_rgb(ctx, 1, 0, 0)
-    # Graphics.set_line_width(ctx, 1.0)
-    # draw_polygon(ctx, points, closed_curve)
+    # White background
+    Graphics.rectangle(ctx, 0, 0, Graphics.width(canvas), Graphics.height(canvas))
+    Graphics.set_source_rgb(ctx, 1, 1, 1)
+    Graphics.fill(ctx)
 
     if !just_curve && show_controls
         # Control polygon
         Graphics.set_source_rgb(ctx, 1, 0, 1)
         Graphics.set_line_width(ctx, 2.0)
-        draw_polygon(ctx, controls, closed_curve)
+        foreach(i -> draw_polygon(ctx, controls[i], true), 1:nr_closed)
+        foreach(i -> draw_polygon(ctx, controls[i], false), nr_closed+1:length(controls))
     end
 
     # Generated curve
     Graphics.set_source_rgb(ctx, 0.8, 0.3, 0)
     Graphics.set_line_width(ctx, 2.0)
-    draw_polygon(ctx, curve, closed_curve)
+    foreach(i -> draw_polygon(ctx, curve[i], true), 1:nr_closed)
+    foreach(i -> draw_polygon(ctx, curve[i], false), nr_closed+1:length(curve))
 
     just_curve && return
 
@@ -717,13 +716,16 @@ draw_callback = @guarded (canvas) -> begin
     if show_curvature
         Graphics.set_source_rgb(ctx, 0, 0, 1)
         Graphics.set_line_width(ctx, 1.0)
-        draw_polygon(ctx, curvature, closed_curve)
-        for i in 1:length(curvature)
-            i % curvature_sparsity != 1 && i != length(curvature) && continue
-            Graphics.new_path(ctx)
-            Graphics.move_to(ctx, curve[i][1], curve[i][2])
-            Graphics.line_to(ctx, curvature[i][1], curvature[i][2])
-            Graphics.stroke(ctx)
+        foreach(i -> draw_polygon(ctx, curvature[i], true), 1:nr_closed)
+        foreach(i -> draw_polygon(ctx, curvature[i], false), nr_closed+1:length(curvature))
+        for j in 1:length(curvature)
+            for i in 1:length(curve[j])
+                i % curvature_sparsity != 1 && i != length(curvature[j]) && continue
+                Graphics.new_path(ctx)
+                Graphics.move_to(ctx, curve[j][i][1], curve[j][i][2])
+                Graphics.line_to(ctx, curvature[j][i][1], curvature[j][i][2])
+                Graphics.stroke(ctx)
+            end
         end
     end
 
@@ -763,18 +765,26 @@ function clear_variables!()
     global curvature = []
     global max_curvatures = []
     global current_file = nothing
+    global nr_closed = 0
 end
 
 function generate_curve()
+    if !incremental
+        global controls = []
+        global curve = []
+        global curvature = []
+        global max_curvatures = []
+        global nr_closed = 0
+    end
+
     if length(points) < 3
         if length(points) == 2
-            global controls = [points[1], (points[1] + points[2]) / 2, points[2]]
-            global curve = [points[1], points[2]]
-            global curvature = []
+            push!(controls, [points[1], (points[1] + points[2]) / 2, points[2]])
+            push!(curve, [points[1], points[2]])
+            push!(curvature, [points[1], points[2]])
         end
         return
     end
-
     local cpts, t, eval_fn, curvature_fn
 
     if curve_type == 0
@@ -787,46 +797,50 @@ function generate_curve()
         cpts = [create_cubic(c, alpha) for c in cpts]
         eval_fn, curvature_fn = bezier_eval, bezier_curvature
     elseif curve_type == 2
-        # Trigonometric B
+        # Trigonometric
         cpts, t = interpolate_trig(points, closed=closed_curve, alpha=alpha * 2)
         eval_fn = (curve, u, d=0) -> trig_eval(curve, alpha * 2, u, d)
         curvature_fn = (curve, u) -> trig_curvature(curve, alpha * 2, u)
     end
 
-    global controls = vcat(cpts...)
-    global curve = []
-    global curvature = []
+    push!(controls, vcat(cpts...))
+    push!(curve, [])
+    push!(curvature, [])
+    nr_closed += closed_curve ? 1 : 0
+
     for c in cpts
         for u in range(0, stop=1, length=resolution) # endpoints are drawn twice
             der = eval_fn(c, u, 1)
             p = der[1]
             n = normalize([der[2][2], -der[2][1]])
             k = curvature_fn(c, u)
-            push!(curve, p)
-            push!(curvature, p + n * k * curvature_scaling)
+            push!(curve[end], p)
+            push!(curvature[end], p + n * k * curvature_scaling)
         end
     end
-    global max_curvatures = [eval_fn(cpts[i], t[i]) for i in 1:length(t)]
+    append!(max_curvatures, [eval_fn(cpts[i], t[i]) for i in 1:length(t)])
 end
 
 function display_design(canvas, filename)
     open_curves, closed_curves = load_design(filename)
     old_closed = closed_curve
     clear_variables!()
-    draw(canvas)
     global incremental = true
     global closed_curve = true
+    all_points = []
     for c in closed_curves
         global points = c
+        append!(all_points, points)
         generate_curve()
-        draw(canvas)
     end
     global closed_curve = false
     for c in open_curves
         global points = c
+        append!(all_points, points)
         generate_curve()
-        draw(canvas)
     end
+    global points = all_points
+    draw(canvas)
     clear_variables!()
     global closed_curve = old_closed
     global incremental = false
@@ -855,6 +869,8 @@ mousemove_handler = @guarded (canvas, event) -> begin
 end
 
 function setup_gui()
+    clear_variables!()
+
     win = GtkWindow("ϵ-κ-curves")
     vbox = GtkBox(:v)
 
@@ -987,7 +1003,6 @@ function setup_gui()
     end
     push!(hbox, just)
 
-    clear_variables!()
     showall(win)
 end
 
