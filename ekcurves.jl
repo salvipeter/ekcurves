@@ -39,6 +39,7 @@ controls = []
 curve = []
 curvature = []
 max_curvatures = []
+current_file = nothing
 
 # Designs
 designs = ["bear", "deer", "elephant", "bird", "plane", "pumpkin", "rose", "dinosaur"]
@@ -175,13 +176,37 @@ Finds a real root of the polynomial in `[0, 1]`.
 The coefficients are given in the order `[1, x, x^2, ...]`.
 """
 function unit_root(coeffs)
-    ϵ = 1e-8
     p = Polynomial(coeffs)
-    x = roots(p)
-    for xi in x
-        abs(imag(xi)) < ϵ && -ϵ <= real(xi) <= 1 + ϵ && return clamp(real(xi), 0, 1)
+    find_suitable_root(roots(p))
+end
+
+"""
+    find_suitable_root(roots)
+
+Given a vector of complex numbers, selects one that is read and in `[0,1]`.
+When the global variable  `warn_on_multiple_solutions` is `true`,
+this function displays warnings on failure.
+
+When multiple solutions exist, it will return the first acceptable one.
+When there is none, it returns 0.5.
+"""
+function find_suitable_root(roots, ϵ = 1e-8)
+    if warn_on_multiple_solutions
+        sol = []
+        for xi in roots
+            if abs(imag(xi)) < ϵ && -ϵ <= real(xi) <= 1 + ϵ
+                push!(sol, xi)
+            end
+        end
+        isempty(sol) && (@warn "No suitable solution"; return 0.5)
+        length(sol) > 1 && @warn "Multiple solutions: $sol"
+        clamp(real(sol[1]), 0, 1)
+    else
+        for xi in roots
+            abs(imag(xi)) < ϵ && -ϵ <= real(xi) <= 1 + ϵ && return clamp(real(xi), 0, 1)
+        end
+        0.5
     end
-    @error "No suitable solution"
 end
 
 """
@@ -517,25 +542,8 @@ such that t is real and is in `[0, 1]`.
 The coefficients are given in the order `[1, x, x^2, ...]`.
 """
 function solve_trig(coeffs)
-    ϵ = 1e-8
     p = Polynomial(coeffs)
-    x = [log(r) * 2 / (im * π) for r in roots(p)]
-    if warn_on_multiple_solutions
-        sol = []
-        for xi in x
-            if abs(imag(xi)) < ϵ && -ϵ <= real(xi) <= 1 + ϵ
-                push!(sol, xi)
-            end
-        end
-        isempty(sol) && (@warn "No suitable solution"; return 0.5)
-        length(sol) > 1 && @warn "Multiple solutions: $sol"
-        clamp(real(sol[1]), 0, 1)
-    else
-        for xi in x
-            abs(imag(xi)) < ϵ && -ϵ <= real(xi) <= 1 + ϵ && return clamp(real(xi), 0, 1)
-        end
-        0.5
-    end
+    find_suitable_root([log(r) * 2 / (im * π) for r in roots(p)])
 end
 
 """
@@ -754,6 +762,7 @@ function clear_variables!()
     global curve = []
     global curvature = []
     global max_curvatures = []
+    global current_file = nothing
 end
 
 function generate_curve()
@@ -800,7 +809,32 @@ function generate_curve()
     global max_curvatures = [eval_fn(cpts[i], t[i]) for i in 1:length(t)]
 end
 
+function display_design(canvas, filename)
+    open_curves, closed_curves = load_design(filename)
+    old_closed = closed_curve
+    clear_variables!()
+    draw(canvas)
+    global incremental = true
+    global closed_curve = true
+    for c in closed_curves
+        global points = c
+        generate_curve()
+        draw(canvas)
+    end
+    global closed_curve = false
+    for c in open_curves
+        global points = c
+        generate_curve()
+        draw(canvas)
+    end
+    clear_variables!()
+    global closed_curve = old_closed
+    global incremental = false
+    global current_file = filename
+end
+
 mousedown_handler = @guarded (canvas, event) -> begin
+    global current_file = nothing
     p = [event.x, event.y]
     global clicked = findfirst(points) do q
         norm(p - q) < 10
@@ -831,6 +865,16 @@ function setup_gui()
     draw(draw_callback, canvas)
     push!(win, vbox)
     push!(vbox, canvas)
+    function refresh(generate = false)
+        if current_file === nothing
+            if generate
+                generate_curve()
+            end
+            draw(canvas)
+        else
+            display_design(canvas, current_file)
+        end
+    end
 
     # Reset button
     reset = GtkButton("Start Over")
@@ -848,7 +892,7 @@ function setup_gui()
     controlsp.active[Bool] = show_controls
     signal_connect(controlsp, "toggled") do cb
         global show_controls = cb.active[Bool]
-        draw(canvas)
+        refresh()
     end
     push!(hbox, controlsp)
 
@@ -857,7 +901,7 @@ function setup_gui()
     curvaturep.active[Bool] = show_curvature
     signal_connect(curvaturep, "toggled") do cb
         global show_curvature = cb.active[Bool]
-        draw(canvas)
+        refresh()
     end
     push!(hbox, curvaturep)
 
@@ -866,8 +910,7 @@ function setup_gui()
     closedp.active[Bool] = closed_curve
     signal_connect(closedp, "toggled") do cb
         global closed_curve = cb.active[Bool]
-        generate_curve()
-        draw(canvas)
+        refresh(true)
     end
     push!(hbox, closedp)
 
@@ -889,8 +932,7 @@ function setup_gui()
         if curve_type != 0      # do not update for N/A
             global alpha = float(eval(Meta.parse(r.label[String])))
         end
-        generate_curve()
-        draw(canvas)
+        refresh(true)
     end
     for r in radios
         r.group[GtkRadioButton] = radios[1]
@@ -914,8 +956,7 @@ function setup_gui()
                 alpha_handler(radios[j])
             end
         end
-        generate_curve()
-        draw(canvas)
+        refresh(true)
     end
     signal_connect(type_handler, changetype, "changed")
     type_handler(changetype)
@@ -933,26 +974,7 @@ function setup_gui()
     load = GtkButton("Load")
     signal_connect(load, "clicked") do _
         i = combo.active[Int] + 1
-        open_curves, closed_curves = load_design("$(designs[i]).pts")
-        old_closed = closed_curve
-        clear_variables!()
-        draw(canvas)
-        global incremental = true
-        global closed_curve = true
-        for c in closed_curves
-            global points = c
-            generate_curve()
-            draw(canvas)
-        end
-        global closed_curve = false
-        for c in open_curves
-            global points = c
-            generate_curve()
-            draw(canvas)
-        end
-        clear_variables!()
-        global closed_curve = old_closed
-        global incremental = false
+        display_design(canvas, "$(designs[i]).pts")
     end
     push!(hbox, load)
 
@@ -961,11 +983,11 @@ function setup_gui()
     just.active[Bool] = just_curve
     signal_connect(just, "toggled") do cb
         global just_curve = cb.active[Bool]
-        draw(canvas)
+        refresh()
     end
     push!(hbox, just)
 
-    generate_curve()
+    clear_variables!()
     showall(win)
 end
 
