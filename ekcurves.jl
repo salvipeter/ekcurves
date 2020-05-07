@@ -36,8 +36,8 @@ current_file = nothing
 
 # Dirty hack
 global radios
-alpha_index = 1
-selected_base = 0
+global alpha_index
+global selected_base
 
 # Global variables
 # `controls`, `curve` and `curvature` are vectors of curve-data
@@ -889,6 +889,7 @@ mousedown_handler = @guarded (canvas, event) -> begin
     end
     if clicked === nothing
         global current_file = nothing
+        global selected_base = 0
         push!(points, p)
         clicked = length(points)
         refresh(canvas, true)
@@ -927,6 +928,8 @@ end
 
 function setup_gui()
     clear_variables!()
+    global alpha_index = 1
+    global selected_base = 0
 
     win = GtkWindow("ϵ-κ-curves")
     vbox = GtkBox(:v)
@@ -943,6 +946,7 @@ function setup_gui()
     reset = GtkButton("Start Over")
     signal_connect(reset, "clicked") do _
         clear_variables!()
+        global selected_base = 0
         draw(canvas)
     end
     hbox = GtkBox(:h)
@@ -1050,6 +1054,8 @@ function setup_gui()
     load = GtkButton("Load")
     signal_connect(load, "clicked") do _
         i = combo.active[Int] + 1
+        global selected_base = 0
+        global selected = []
         display_design(canvas, "$(designs[i]).pts")
     end
     push!(hbox, load)
