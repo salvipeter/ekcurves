@@ -37,6 +37,7 @@ current_file = nothing
 # Dirty hack
 global radios
 alpha_index = 1
+selected_base = 0
 
 # Global variables
 # `controls`, `curve` and `curvature` are vectors of curve-data
@@ -759,7 +760,7 @@ draw_callback = @guarded (canvas) -> begin
             Graphics.arc(ctx, p[1], p[2], point_size, 0, 2pi)
             Graphics.fill(ctx)
         end
-        if i in selected
+        if (i - selected_base) in selected
             Graphics.set_source_rgb(ctx, 0, 0, 1)
             Graphics.set_line_width(ctx, 2.0)
         else
@@ -848,7 +849,10 @@ end
 function display_design(canvas, filename)
     open_curves, closed_curves = load_design(filename)
     old_closed = closed_curve
+    old_selected = selected
+    old_selected_alpha = selected_alpha
     clear_variables!()
+    global selected = old_selected
     global incremental = true
     global closed_curve = true
     all_points = []
@@ -860,38 +864,42 @@ function display_design(canvas, filename)
     global closed_curve = false
     for c in open_curves
         global points = c
+        if c === open_curves[end]
+            global selected_alpha = old_selected_alpha
+            global selected_base = length(all_points)
+        end
         append!(all_points, points)
         generate_curve()
     end
     global points = all_points
     draw(canvas)
     clear_variables!()
+    global selected = old_selected
+    global selected_alpha = old_selected_alpha
+    points = open_curves[end]
     global closed_curve = old_closed
     global incremental = false
     global current_file = filename
 end
 
 mousedown_handler = @guarded (canvas, event) -> begin
-    global current_file = nothing
     p = [event.x, event.y]
     global clicked = findfirst(points) do q
         norm(p - q) < 10
     end
     if clicked === nothing
+        global current_file = nothing
         push!(points, p)
         clicked = length(points)
-        generate_curve()
-        draw(canvas)
+        refresh(canvas, true)
     else
         global selected
         if event.state & 1 == 1     # shift
             push!(selected, clicked)
-            generate_curve()
-            draw(canvas)
+            refresh(canvas, true)
         elseif event.state & 4 == 4 # control
             selected = [clicked]
-            generate_curve()
-            draw(canvas)
+            refresh(canvas, true)
         elseif !isempty(selected)
             global selected = []
             global radios[alpha_index].active[Bool] = true
@@ -904,6 +912,17 @@ mousemove_handler = @guarded (canvas, event) -> begin
     points[clicked] = [event.x, event.y]
     generate_curve()
     draw(canvas)
+end
+
+function refresh(canvas, generate = false)
+    if current_file === nothing
+        if generate
+            generate_curve()
+        end
+        draw(canvas)
+    else
+        display_design(canvas, current_file)
+    end
 end
 
 function setup_gui()
@@ -919,16 +938,6 @@ function setup_gui()
     draw(draw_callback, canvas)
     push!(win, vbox)
     push!(vbox, canvas)
-    function refresh(generate = false)
-        if current_file === nothing
-            if generate
-                generate_curve()
-            end
-            draw(canvas)
-        else
-            display_design(canvas, current_file)
-        end
-    end
 
     # Reset button
     reset = GtkButton("Start Over")
@@ -946,7 +955,7 @@ function setup_gui()
     controlsp.active[Bool] = show_controls
     signal_connect(controlsp, "toggled") do cb
         global show_controls = cb.active[Bool]
-        refresh()
+        refresh(canvas)
     end
     push!(hbox, controlsp)
 
@@ -955,7 +964,7 @@ function setup_gui()
     curvaturep.active[Bool] = show_curvature
     signal_connect(curvaturep, "toggled") do cb
         global show_curvature = cb.active[Bool]
-        refresh()
+        refresh(canvas)
     end
     push!(hbox, curvaturep)
 
@@ -964,7 +973,7 @@ function setup_gui()
     closedp.active[Bool] = closed_curve
     signal_connect(closedp, "toggled") do cb
         global closed_curve = cb.active[Bool]
-        refresh(true)
+        refresh(canvas, true)
     end
     push!(hbox, closedp)
 
@@ -999,7 +1008,7 @@ function setup_gui()
                 global selected_alpha = float(eval(Meta.parse(r.label[String])))
             end
         end
-        refresh(true)
+        refresh(canvas, true)
     end
     for r in radios
         r.group[GtkRadioButton] = radios[1]
@@ -1023,7 +1032,7 @@ function setup_gui()
                 alpha_handler(radios[j])
             end
         end
-        refresh(true)
+        refresh(canvas, true)
     end
     signal_connect(type_handler, changetype, "changed")
     type_handler(changetype)
@@ -1050,7 +1059,7 @@ function setup_gui()
     just.active[Bool] = just_curve
     signal_connect(just, "toggled") do cb
         global just_curve = cb.active[Bool]
-        refresh()
+        refresh(canvas)
     end
     push!(hbox, just)
 
