@@ -887,7 +887,7 @@ mousedown_handler = @guarded (canvas, event) -> begin
     global clicked = findfirst(points) do q
         norm(p - q) < 10
     end
-    if clicked === nothing
+    if clicked === nothing && isempty(selected)
         global current_file = nothing
         global selected_base = 0
         push!(points, p)

@@ -1,22 +1,57 @@
-1. k-curve vs. trigonometric basis (alpha = 0.5)
-  - closed curve with 3-4 points, curvature
-    => trigonometric will be close to a circle, k-curve is very uneven
+[closed, original, first alpha, bird]
+    x   x
 
-2. Changing alpha values globally
-  - change from quadratic to cubic while showing control polygons
-  - cubic, open curve with a few points & inflections, curvature
-  - cubic, closed curve with a few point & inflections, curvature
 
-3. Bezier vs. trigonometric basis (various alpha values)
-  - trigonometric, closed curve with a few points & inflections, curvature
-  - changing between cubic & trigonometric
-    => only small changes when alpha is large
+x           x
+curvature on
+controls on
+inflection
+controls off
+trig.basis
+alpha ->
+alpha 0.5
+original
+controls on
+cubic
+alpha ->
+alpha 0.5
+controls off
+start over
+closed off
+  x
+  x
 
-4. Local change of alpha
-  - open curve with 5-6 points, curvature
-  - select different points, then multiple points
-  - [bird] without curvature, wing manipulation
+     x
+  x  x
+trig.basis
+alpha 0.65
+cubic
+alpha 0.85
+trig.basis
+alpha 0.85
+cubic
+alpha 2/3
+start over
+     x
+  x     x
 
-5. Global change of models (various alpha values)
-  - [bear, deer] without curvature, with points
-  - [rose, elephant] without curvature, without points
+x         x
+select middle point
+alpha ->
+select middle 3 points
+alpha <-
+curvature off
+load
+select wing point
+alpha ->
+select wing 3 points
+alpha <-
+bear load
+alpha 0.7, 0.8, 0.9, 0.95, 0.85, 0.75, 2/3
+deer load
+alpha 0.7, 0.8, 0.9, 0.95, 0.85, 0.75, 2/3
+rose load
+show only the curve
+alpha 0.7, 0.8, 0.9, 0.95, 0.85, 0.75, 2/3
+elephant load
+alpha 0.7, 0.8, 0.9, 0.95, 0.85, 0.75, 2/3

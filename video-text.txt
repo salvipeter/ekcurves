@@ -1,0 +1,15 @@
+Kappa-curves interpolate a series of user-defined points in such a way that the interpolated points will be local extrema of curvature. Internally it is composed of quadratic Bezier segments that connect with G2 continuity, except at inflection points, where only the absolute value of curvature agrees.
+
+We have shown that the Bernstein basis can be replaced by other bases, such as a kind of trigonometric basis. This gives a much more regular curvature distribution, and it is capable of exactly representing circular arcs, as well.
+
+This basis also has an inherent "alpha" parameter that can be used to control the curvature. Larger alpha values mean larger curvatures at the interpolation points, and a steeper change of curvature, resulting in more flat curve segments between the points.
+
+The same kind of control can be achieved with Bezier curves, if we use cubic segments instead of quadratic ones. The internal control points are placed by linear interpolation according to alpha, so in consequence, when alpha is two-thirds, we get back the same curve. With larger alpha values, we see the same effect as before: larger absolute curvature and flatter segments between input points.
+
+Kappa-curves, and our extended "epsilon-kappa-curves", allow both closed and open curves. The difference between the Bernstein- and trigonometric bases is clearly visible on the base curve, but diminishes as we select larger alpha values.
+
+Alpha values can also be changed locally, for a selected set of input points. Even in this case, the same kind of curvature continuity is preserved throughout the spline. This feature can be used to edit models locally. For example, take this bird model. Selecting a point on its wing, the designer can tune its local curvature, resulting in a different impression.
+
+Finally, let us look at the effect of changing the alpha value globally. All of these models were re-drawn based on the original kappa-curve paper.
+
+This kind of curvature control could be a useful addition to a designer's toolbox.
