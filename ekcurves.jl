@@ -712,8 +712,10 @@ draw_callback = @guarded (canvas) -> begin
 
     just_curve && return
 
+    show_curvature_comb = current_file === nothing && show_curvature
+
     # Curvature comb
-    if show_curvature
+    if show_curvature_comb
         Graphics.set_source_rgb(ctx, 0, 0, 1)
         Graphics.set_line_width(ctx, 1.0)
         foreach(i -> draw_polygon(ctx, curvature[i], true), 1:nr_closed)
@@ -729,7 +731,7 @@ draw_callback = @guarded (canvas) -> begin
         end
     end
 
-    if show_curvature
+    if show_curvature_comb
         # Maximum curvature points
         for p in max_curvatures[1:end]
             Graphics.set_source_rgb(ctx, 1, 0, 0)
@@ -740,7 +742,7 @@ draw_callback = @guarded (canvas) -> begin
 
     # Input points
     for p in points[1:end]
-        if show_curvature
+        if show_curvature_comb
             Graphics.set_source_rgb(ctx, 0, 1, 0)
             Graphics.arc(ctx, p[1], p[2], point_size, 0, 2pi)
             Graphics.fill(ctx)
@@ -840,6 +842,7 @@ function display_design(canvas, filename)
         generate_curve()
     end
     global points = all_points
+    global current_file = filename
     draw(canvas)
     clear_variables!()
     global closed_curve = old_closed
@@ -989,8 +992,8 @@ function setup_gui()
     push!(hbox, combo)
     load = GtkButton("Load")
     signal_connect(load, "clicked") do _
-        i = combo.active[Int] + 1
-        display_design(canvas, "$(designs[i]).pts")
+         i = combo.active[Int] + 1
+         display_design(canvas, "$(designs[i]).pts")
     end
     push!(hbox, load)
 
