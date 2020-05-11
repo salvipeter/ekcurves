@@ -46,7 +46,7 @@ global max_curvatures
 global nr_closed
 
 # Designs
-designs = ["bear", "deer", "elephant", "bird", "plane", "pumpkin", "rose", "dinosaur"]
+designs = ["bear", "deer", "elephant", "bird", "plane", "pumpkin", "rose", "dinosaur", "rabbit"]
 
 
 # Interpolation
