@@ -53,7 +53,7 @@ global selected
 global selected_alpha
 
 # Designs
-designs = ["bear", "deer", "elephant", "bird", "plane", "pumpkin", "rose", "dinosaur"]
+designs = ["bear", "deer", "elephant", "bird", "plane", "pumpkin", "rose", "dinosaur", "rabbit"]
 
 
 # Interpolation
